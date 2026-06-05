@@ -2,15 +2,15 @@
 
 ## Overview
 
-The Local AI Career Assistant is designed as a self-hosted career intelligence system that uses local open-weight language models to analyze job descriptions, extract structured skill data, track applications, and generate career development insights.
+The Local AI Career Assistant is a self-hosted career intelligence system that uses local open-weight language models to analyze job descriptions, extract structured skill data, track job applications, and generate career development insights.
 
-The system is designed around a modular architecture so that each component can be improved or replaced over time.
+The system follows a modular architecture so that each component can be improved or replaced over time.
 
 ## Architecture Layers
 
 ### 1. Input Layer
 
-The input layer contains the raw information that will be analyzed or tracked by the system.
+The input layer contains the raw information analyzed or tracked by the system.
 
 - Job descriptions
 - Resume/CV content
@@ -25,7 +25,6 @@ Current components:
 
 - Ollama
 - Qwen 2.5 7B
-- Open-weight local language model execution
 
 Purpose:
 
