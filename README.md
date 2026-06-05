@@ -1,14 +1,15 @@
 # Local AI Career Assistant
 
-A self-hosted AI-powered platform that analyzes job descriptions, tracks applications, identifies skill demand trends, and provides personalized career insights using local open-weight language models.
+A self-hosted AI-powered career assistant designed to analyze job descriptions, extract skill requirements, track job applications, and generate career development insights using local open-weight language models.
 
-## Objectives
+## Project Objectives
 
-- Analyze job descriptions using local AI models
-- Extract technical and soft skills
-- Track job applications
-- Identify market demand trends
-- Generate personalized career development insights
+- Deploy a local AI environment using open-weight language models.
+- Analyze job descriptions for technical skills, soft skills, tools, platforms, and certifications.
+- Convert job description content into structured data for future storage and analysis.
+- Track job applications, including applied roles, status updates, and outcomes.
+- Identify repeated skill demands across targeted IT job descriptions.
+- Generate insights to support career planning and skill prioritization.
 
 ## Current Technology Stack
 
@@ -16,13 +17,16 @@ A self-hosted AI-powered platform that analyzes job descriptions, tracks applica
 - Qwen 2.5 7B
 - Open WebUI
 - Docker Desktop
+- Windows 11
 
-## Planned Technology Stack
+## Planned Components
 
-- Python
-- SQLite
-- Analytics Dashboard
+- Python-based job description extraction pipeline
+- SQLite database for structured storage
+- Application tracking module
+- Skill demand analytics
+- Basic reporting or dashboard interface
 
 ## Project Status
 
-Week 1: Local AI environment setup completed.
+Initial local AI environment has been deployed and tested successfully.
