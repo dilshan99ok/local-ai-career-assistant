@@ -26,7 +26,7 @@ Rules:
   - Cybersecurity
   - Systems Administration
   - Data Centre
-  - Software Development
+  - Infrastructure
   - Other
 - Technical skills are general technical abilities.
 - Soft skills are communication, teamwork, customer service, problem-solving, leadership, and similar qualities.
