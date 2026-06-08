@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+
+# PyCharm
+.idea/
+
+# Database
+*.db
+
+# Logs
+Logs/
+
+# Screenshots
+Screenshots/
+
+# Virtual environments
+venv/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project data
+Data/database/
+Data/processed/
+Data/raw-job-descriptions/
