@@ -38,6 +38,10 @@ def main():
         domain = VALID_DOMAINS.get(domain.lower(), domain)
     source_file = get_input("Source file, e.g. job2.json (optional): ", required=False)
     date_applied = get_input("Date applied, e.g. 2026-06-08: ")
+    follow_up_date = get_input(
+        "Follow-up date (optional): ",
+        required=False
+    )
     current_status = get_input("Status (Applied / Interview / Offer / Rejected): ")
     notes = get_input("Notes (optional): ", required=False)
 
