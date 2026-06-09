@@ -1,32 +1,42 @@
 # Local AI Career Assistant
 
-A self-hosted AI-powered career assistant designed to analyze job descriptions, extract skill requirements, track job applications, and generate career development insights using local open-weight language models.
+A self-hosted AI-powered career intelligence system that analyzes job descriptions, extracts structured skill data, tracks job applications, and helps identify follow-up actions.
 
-## Project Objectives
+## Overview
 
-- Deploy a local AI environment using open-weight language models.
-- Analyze job descriptions for technical skills, soft skills, tools, platforms, and certifications.
-- Convert job description content into structured data for future storage and analysis.
-- Track job applications, including applied roles, status updates, and outcomes.
-- Identify repeated skill demands across targeted IT job descriptions.
-- Generate insights to support career planning and skill prioritization.
+This project combines local open-weight AI models with Python and SQLite to support job search organization and career planning.
 
-## Current Technology Stack
+The system uses a local AI model to convert unstructured job descriptions into structured JSON data, then stores the extracted information in a SQLite database for analysis and application tracking.
 
+## Key Features
+
+- Local AI-powered job description analysis
+- Structured JSON extraction from job descriptions
+- Batch processing of multiple job descriptions
+- SQLite database storage
+- Skill, tool, certification, and domain analytics
+- Application tracking
+- Follow-up date tracking for applied jobs
+- Simple command-line pipeline runner
+
+## Technology Stack
+
+- Python
+- SQLite
 - Ollama
 - Qwen 2.5 7B
 - Open WebUI
 - Docker Desktop
-- Windows 11
 
-## Planned Components
+## Current Workflow
 
-- Python-based job description extraction pipeline
-- SQLite database for structured storage
-- Application tracking module
-- Skill demand analytics
-- Basic reporting or dashboard interface
-
-## Project Status
-
-Initial local AI environment has been deployed and tested successfully.
+```text
+Job Description (.txt)
+        ↓
+Ollama + Qwen 2.5
+        ↓
+Structured JSON
+        ↓
+SQLite Database
+        ↓
+Analytics Report
