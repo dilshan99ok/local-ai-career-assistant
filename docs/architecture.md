@@ -33,4 +33,4 @@ ChatGPT OAuth credentials are stored outside the repository. `.env` files, the d
 - Create or update the database schema: `python Scripts/create_database.py`
 - Run the tests: `python -m unittest discover -s Tests -p 'test_*.py' -q`
 
-Older scripts under `Scripts/` include one-off database, report, and batch-pipeline utilities from the first version. They are retained for now but are not part of the dashboard workflow.
+The first version's one-off database, report, and batch-pipeline scripts have been removed. `Scripts/create_database.py` remains the supported schema setup command.

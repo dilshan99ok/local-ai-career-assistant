@@ -45,4 +45,4 @@ The application uses Sign in with ChatGPT for eligible structured job-descriptio
 
 The sign-in flow uses a browser-based OAuth callback and stores its refresh token outside the project. It does not require an OpenAI API key or API credits; availability depends on the ChatGPT account's plan-sharing eligibility.
 
-The supported app entry point is `App/dashboard.py`. Some older command-line scripts remain in `Scripts/` for reference and are outside the dashboard workflow; see [architecture](docs/architecture.md).
+The supported app entry point is `App/dashboard.py`; see [architecture](docs/architecture.md) for the current modules and data flow.
