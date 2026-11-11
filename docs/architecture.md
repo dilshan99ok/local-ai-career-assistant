@@ -1,128 +1,36 @@
-# System Architecture
+# Architecture
 
-## Overview
+## Main workflow
 
-The Local AI Career Assistant is a self-hosted career intelligence system that uses local open-weight language models to analyze job descriptions, extract structured skill data, track job applications, and generate career development insights.
+1. The user submits a public job URL or pastes a job description in the Streamlit dashboard.
+2. `Scripts/job_url.py` reads public HTML when a URL is supplied. The user can paste the description if the site blocks access.
+3. `Scripts/ai_helper.py` sends the description through `Scripts/ai_provider.py` and validates the extracted fields. The review screen allows corrections before saving.
+4. `App/app_utils/database.py` stores the job, application, extracted skills, status history, and follow-up details in SQLite.
+5. The dashboard shows the application pipeline, job workspace, skill demand, and resume fit. A saved application has one contextual profile for editing its details.
 
-The system follows a modular architecture so that each component can be improved or replaced over time.
+## Components
 
-## Architecture Layers
+| Area | Primary files | Responsibility |
+| --- | --- | --- |
+| Dashboard and navigation | `App/dashboard.py`, `App/app_utils/navigation.py` | Sidebar pages, contextual job workspaces, back navigation |
+| Applications | `App/app_pages/applications_page.py` | URL or pasted-description intake, review, tracking, and application profile |
+| Jobs and skills | `App/app_pages/jobs_page.py`, `App/app_pages/job_detail_page.py`, `App/app_pages/skills_page.py` | Job library, per-job details, demand analysis |
+| Resumes and tailoring | `App/app_pages/resume_page.py`, `App/app_pages/tailoring_page.py` | Source CVs, local fit and gaps, resume and cover-letter drafts |
+| AI and authentication | `Scripts/ai_provider.py`, `Scripts/ai_helper.py`, `Scripts/chatgpt_auth.py` | ChatGPT sign-in, extraction, and generation |
+| Storage | `App/app_utils/database.py` | SQLite schema, migrations, queries, and updates |
+| Local analysis | `Scripts/job_fit.py`, `Scripts/skill_analysis.py`, `Scripts/skill_taxonomy.py` | Repeatable fit and skill summaries |
 
-### 1. Input Layer
+## Data and files
 
-The input layer contains the raw information analyzed or tracked by the system.
+The SQLite database is under `Data/database/` and is excluded from Git. It contains saved jobs, applications, skill and certification data, resume profiles, document drafts, and tracking history. Uploaded CVs retain extracted text and, for new uploads, the original file so the app can preview its layout. DOCX preview uses Microsoft Word on Windows to render a temporary PDF. Files uploaded before original-file storage was added can be attached from the CV preview.
 
-- Job descriptions
-- Resume/CV content
-- Application records
-- User notes
+ChatGPT OAuth credentials are stored outside the repository. `.env` files, the database, raw job descriptions, and processed exports are ignored by Git. The repository contains code and configuration examples only.
 
-### 2. AI Layer
+## Supported entry points
 
-The AI layer is responsible for understanding and extracting useful information from unstructured text.
+- Start the dashboard: `python -m streamlit run App/dashboard.py`
+- Sign in for AI features: `python Scripts/sign_in_with_chatgpt.py`
+- Create or update the database schema: `python Scripts/create_database.py`
+- Run the tests: `python -m unittest discover -s Tests -p 'test_*.py' -q`
 
-Current components:
-
-- Ollama
-- Qwen 2.5 7B
-
-Purpose:
-
-- Analyze job descriptions
-- Extract technical skills, soft skills, tools, platforms, and certifications
-- Convert unstructured text into structured JSON
-- Support career-related question answering
-
-### 3. User Interface Layer
-
-The user interface layer provides a practical way to interact with the local AI model.
-
-Current component:
-
-- Open WebUI
-
-Purpose:
-
-- Chat with the local AI model
-- Test job description analysis prompts
-- Validate structured JSON extraction
-- Experiment with career assistant workflows
-
-### 4. Processing Layer
-
-The processing layer will automate the extraction workflow.
-
-Planned component:
-
-- Python extraction pipeline
-
-Purpose:
-
-- Read job description files
-- Send job descriptions to the local AI model through Ollama
-- Receive structured JSON output
-- Validate and clean extracted data
-- Prepare data for database storage
-
-### 5. Storage Layer
-
-The storage layer will store extracted job intelligence data and application tracking information.
-
-Planned component:
-
-- SQLite database
-
-Planned datasets:
-
-#### Job Intelligence Data
-
-- Role titles
-- Role categories
-- Technical skills
-- Soft skills
-- Tools and platforms
-- Certifications
-- Networking concepts
-- Security concepts
-- Experience levels
-
-#### Application Tracking Data
-
-- Company
-- Job title
-- Location
-- Work mode
-- Application status
-- Date applied
-- Interview status
-- Outcome notes
-
-### 6. Analytics Layer
-
-The analytics layer will generate insights from the stored data.
-
-Planned analytics:
-
-- Most requested technical skills
-- Most requested soft skills
-- Common tools and platforms
-- Certification demand trends
-- Networking and security skill trends
-- Role category comparisons
-- Application status summaries
-- Skill gap insights
-
-## High-Level Workflow
-
-```text
-Job Description
-        ↓
-AI Extraction Engine
-        ↓
-Structured JSON Output
-        ↓
-SQLite Database
-        ↓
-Analytics Engine
-        ↓
-Career Insights
+Older scripts under `Scripts/` include one-off database, report, and batch-pipeline utilities from the first version. They are retained for now but are not part of the dashboard workflow.

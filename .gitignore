@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 
+# Environment variables and API credentials
+.env
+.env.*
+!.env.example
+
 # PyCharm
 .idea/
 
