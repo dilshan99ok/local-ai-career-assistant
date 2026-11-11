@@ -121,37 +121,25 @@ def apply_styles():
             height: 0.9rem;
         }
 
-        section[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] {
-            gap: 0.18rem;
-        }
-
-        section[data-testid="stSidebar"] [data-testid="stRadio"] label {
+        section[data-testid="stSidebar"] [class*="st-key-sidebar_page_"] button {
             border: 1px solid transparent;
             border-radius: 0.58rem;
             color: rgba(244,247,251,0.76);
             cursor: pointer;
             min-height: 2.1rem;
             padding: 0.42rem 0.58rem !important;
+            justify-content: flex-start;
+            background: transparent;
             transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
         }
 
-        section[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+        section[data-testid="stSidebar"] [class*="st-key-sidebar_page_"] button:hover {
             background: rgba(255,255,255,0.055);
             border-color: rgba(255,255,255,0.08);
             color: #ffffff;
         }
 
-        section[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
-            background: rgba(142,197,240,0.14);
-            border-color: rgba(142,197,240,0.24);
-            color: #ffffff;
-        }
-
-        section[data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child {
-            display: none !important;
-        }
-
-        section[data-testid="stSidebar"] [data-testid="stRadio"] label p {
+        section[data-testid="stSidebar"] [class*="st-key-sidebar_page_"] button p {
             font-size: 0.84rem !important;
             font-weight: 650 !important;
             margin: 0 !important;

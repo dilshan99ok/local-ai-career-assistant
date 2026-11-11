@@ -9,7 +9,7 @@ PAGE_OPTIONS = (
 
 
 def current_route(state):
-    page = state.get("selected_page", "Overview")
+    page = state.get("current_page", state.get("selected_page", "Overview"))
     if page not in PAGE_OPTIONS:
         page = "Overview"
     job_id = state.get("selected_job_id") if page == "Jobs" and state.get("active_job_detail") else None
@@ -45,7 +45,8 @@ def apply_requested_route(state):
     destination = state.pop("requested_route", None)
     if not destination:
         return
-    state["selected_page"] = destination["page"]
+    state["scroll_to_top"] = state.get("scroll_to_top", 0) + 1
+    state["current_page"] = destination["page"]
     state["active_job_detail"] = destination["page"] == "Jobs" and destination.get("job_id") is not None
     if state["active_job_detail"]:
         state["selected_job_id"] = int(destination["job_id"])
@@ -59,13 +60,21 @@ def clear_sidebar_history(state):
     state["navigation_history"] = []
     state["active_job_detail"] = False
     state.pop("requested_route", None)
-    if state.get("selected_page") == "Jobs":
+    if state.get("current_page", state.get("selected_page")) == "Jobs":
         state["jobs_table_reset"] = state.get("jobs_table_reset", 0) + 1
 
 
-def sidebar_changed():
-    clear_sidebar_history(st.session_state)
-    st.session_state.pop("editing_application_id", None)
+def sidebar_navigate(state, page):
+    """Open a main page, including its list when the page is already selected."""
+    if page not in PAGE_OPTIONS:
+        raise ValueError(f"Unknown page: {page}")
+    if current_route(state) == {"page": page, "job_id": None}:
+        return False
+    clear_sidebar_history(state)
+    state["current_page"] = page
+    state["scroll_to_top"] = state.get("scroll_to_top", 0) + 1
+    state.pop("editing_application_id", None)
+    return True
 
 
 def navigate_to(page, job_id=None):
@@ -96,3 +105,38 @@ def render_back_navigation():
         trail_col.caption("…  /  " + "  /  ".join(route_label(route) for route in trail))
     else:
         trail_col.caption("  /  ".join(route_label(route) for route in trail))
+
+
+def render_scroll_reset():
+    """Start each route at its heading, even when Streamlit retains scroll position."""
+    state = st.session_state
+    revision = state.get("scroll_to_top", 0)
+    if not revision or revision == state.get("scroll_to_top_rendered"):
+        return
+    state["scroll_to_top_rendered"] = revision
+    st.iframe(
+        f"""
+        <script>
+          // Each route change gives this iframe a new revision so the script reruns.
+          const revision = {revision};
+          const reset = () => {{
+            try {{
+              const doc = window.parent.document;
+              for (const el of [
+                doc.querySelector('[data-testid="stAppViewContainer"]'),
+                doc.querySelector('[data-testid="stMain"]'),
+                doc.querySelector('section.main'),
+                doc.scrollingElement,
+              ]) {{
+                if (el) el.scrollTop = 0;
+              }}
+              window.parent.scrollTo(0, 0);
+            }} catch (e) {{ /* The sidebar and back buttons remain available. */ }}
+          }};
+          reset();
+          requestAnimationFrame(reset);
+          setTimeout(reset, 150);
+        </script>
+        """,
+        height=1,
+    )
