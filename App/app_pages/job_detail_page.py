@@ -79,7 +79,7 @@ def render_job_header(job, job_id, applications_df, fit):
             relationship.append(f"End client industry: {client_industry}")
         st.info(" · ".join(relationship))
 
-    applications_label = "Not applied"
+    applications_label = "No application record"
     follow_up = "—"
     if not applications_df.empty:
         application = applications_df.iloc[0]

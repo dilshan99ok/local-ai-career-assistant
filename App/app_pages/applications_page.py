@@ -27,6 +27,7 @@ from Scripts.job_url import JobPageFetchError, fetch_job_posting
 from App.app_utils.navigation import navigate_to
 from App.app_pages.opportunities_page import (
     build_opportunities_df, filter_opportunities, render_opportunities_table,
+    tracked_jobs,
 )
 
 DOMAINS = [
@@ -761,16 +762,14 @@ def render_applications():
 
     st.title("Applications")
     jobs_df = attach_fit_scores(
-        get_jobs_df(),
+        tracked_jobs(get_jobs_df(), applications_df),
         get_skill_demand_rows_df(),
         get_resume_profiles_df(),
     )
     opportunities_df = build_opportunities_df(jobs_df, applications_df)
-    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-    metric_col1.metric("Opportunities", len(opportunities_df))
-    metric_col2.metric("Applications", len(applications_df))
-    metric_col3.metric("Not applied", int((opportunities_df["kind"] == "job").sum()))
-    metric_col4.metric("80%+ matches", int((pd.to_numeric(jobs_df.get("fit_score", pd.Series(dtype=float)), errors="coerce") >= 80).sum()))
+    metric_col1, metric_col2 = st.columns(2)
+    metric_col1.metric("Applications", len(applications_df))
+    metric_col2.metric("80%+ matches", int((pd.to_numeric(jobs_df.get("fit_score", pd.Series(dtype=float)), errors="coerce") >= 80).sum()))
 
     action_col, _ = st.columns([1.5, 4])
     is_adding = bool(st.session_state.get("show_add_application_form"))
@@ -789,21 +788,16 @@ def render_applications():
 
 def render_opportunity_list(opportunities_df, applications_df):
     heading_col, export_col = st.columns([5, 1], vertical_alignment="bottom")
-    heading_col.subheader("Opportunities")
-
-    view = st.segmented_control(
-        "Show", ["All", "Applications", "Not applied"],
-        default="All", key="opportunities_view",
-    )
+    heading_col.subheader("Saved applications")
     search_col, domain_col, status_col = st.columns([2, 1, 1])
     search = search_col.text_input("Search", key="opportunities_search", placeholder="Company, title, domain, or notes")
     domains = ["All", *sorted(value for value in opportunities_df["domain"].unique() if clean_value(value))]
     domain = domain_col.selectbox("Domain", domains, key="opportunities_domain")
     statuses = ["All", *sorted(value for value in opportunities_df["current_status"].unique() if clean_value(value))]
     status = status_col.selectbox("Status", statuses, key="opportunities_status")
-    filtered = filter_opportunities(opportunities_df, view, search, domain, status)
+    filtered = filter_opportunities(opportunities_df, search, domain, status)
 
-    signature = f"{view}|{search}|{domain}|{status}"
+    signature = f"{search}|{domain}|{status}"
     if st.session_state.get("opportunities_filter_signature") != signature:
         st.session_state["opportunities_current_page"] = 1
         st.session_state["opportunities_table_reset"] = st.session_state.get("opportunities_table_reset", 0) + 1
@@ -817,12 +811,12 @@ def render_opportunity_list(opportunities_df, applications_df):
             key="download_opportunities_csv", type="tertiary", icon=":material/download:",
         )
 
-    if view != "Not applied" and not applications_df.empty:
+    if not applications_df.empty:
         layout = st.segmented_control("Layout", ["List", "Pipeline"], default="List", key="opportunities_layout")
         if layout == "Pipeline":
             application_ids = set(filtered["application_id"].dropna().astype(int))
             render_application_pipeline(applications_df[applications_df["id"].isin(application_ids)])
             return
 
-    st.caption(f"Showing {len(filtered)} of {len(opportunities_df)} opportunities · Select a row for details; select a heading to sort.")
+    st.caption(f"Showing {len(filtered)} of {len(opportunities_df)} applications · Select a row for details; select a heading to sort.")
     render_opportunities_table(filtered)

@@ -1,6 +1,7 @@
 import streamlit as st
 
 from App.app_utils.database import (
+    get_applications_df,
     get_applications_for_job_df,
     get_application_messages_df,
     get_job_detail_df,
@@ -12,6 +13,7 @@ from App.app_utils.database import (
     save_application_message,
     save_resume_version,
 )
+from App.app_pages.opportunities_page import tracked_jobs
 from Scripts.job_fit import attach_fit_scores
 from App.app_utils.navigation import navigate_to
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
@@ -49,11 +51,11 @@ def selected_application_context(applications_df, application_id):
 def render_tailoring():
     st.title("Tailoring Studio")
 
-    jobs_df = get_jobs_df()
+    jobs_df = tracked_jobs(get_jobs_df(), get_applications_df())
     profiles_df = get_resume_profiles_df()
     jobs_df = attach_fit_scores(jobs_df, get_skill_demand_rows_df(), profiles_df)
     if jobs_df.empty:
-        st.info("Analyze a job before opening the tailoring studio.")
+        st.info("Add an application with a job description before tailoring documents.")
         return
     if profiles_df.empty:
         st.info("Create a resume profile in Resume & Gaps before tailoring documents.")

@@ -23,7 +23,7 @@ from Scripts.tailoring import (
     build_resume_tailoring_prompt,
 )
 from App.app_pages.tailoring_page import selected_application_context
-from App.app_pages.opportunities_page import build_opportunities_df, filter_opportunities
+from App.app_pages.opportunities_page import build_opportunities_df, filter_opportunities, tracked_jobs
 
 
 class WorkflowTests(unittest.TestCase):
@@ -66,7 +66,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(selected_application_context(applications, None), {})
         self.assertEqual(selected_application_context(applications, 99), {})
 
-    def test_combined_list_keeps_repeated_and_unlinked_applications(self):
+    def test_application_list_keeps_repeated_and_unlinked_applications(self):
         jobs = pd.DataFrame([
             {"id": 1, "source_file": "linked", "company": "A", "job_title": "Engineer", "domain": "Networking", "fit_display": "80%", "created_at": "2026-11-01"},
             {"id": 2, "source_file": "job-only", "company": "B", "job_title": "Support", "domain": "IT Support", "fit_display": "", "created_at": "2026-11-02"},
@@ -77,12 +77,12 @@ class WorkflowTests(unittest.TestCase):
             {"id": 12, "source_file": "missing", "company": "C", "job_title": "Admin", "domain": "Cloud", "current_status": "Applied", "date_applied": "2026-11-05"},
         ])
         combined = build_opportunities_df(jobs, applications)
-        self.assertEqual(len(combined), 4)
+        self.assertEqual(len(combined), 3)
         self.assertEqual(set(combined["application_id"].dropna().astype(int)), {10, 11, 12})
-        self.assertEqual(set(combined[combined["kind"] == "job"]["job_id"].astype(int)), {2})
-        self.assertEqual(len(filter_opportunities(combined, "Applications", "", "All", "All")), 3)
-        self.assertEqual(len(filter_opportunities(combined, "Not applied", "", "All", "All")), 1)
-        self.assertEqual(len(filter_opportunities(combined, "All", "admin", "All", "All")), 1)
+        self.assertEqual(set(combined["job_id"].dropna().astype(int)), {1})
+        self.assertEqual(set(tracked_jobs(jobs, applications)["id"].astype(int)), {1})
+        self.assertEqual(len(filter_opportunities(combined, "", "All", "All")), 3)
+        self.assertEqual(len(filter_opportunities(combined, "admin", "All", "All")), 1)
 
     def test_deleting_application_keeps_analyzed_job(self):
         connection = sqlite3.connect(self.db_path)
@@ -102,7 +102,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(database.get_applications_df().empty)
         self.assertEqual(len(database.get_jobs_df()), 1)
         combined = build_opportunities_df(database.get_jobs_df(), database.get_applications_df())
-        self.assertEqual(combined.iloc[0]["current_status"], "Not applied")
+        self.assertTrue(combined.empty)
+        self.assertTrue(tracked_jobs(database.get_jobs_df(), database.get_applications_df()).empty)
 
     def test_resume_preview_keeps_original_file_and_can_attach_legacy_file(self):
         source = build_resume_docx("# Example CV\nNetwork engineering")

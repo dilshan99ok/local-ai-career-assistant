@@ -22,7 +22,7 @@ An AI-powered career assistant designed to analyze job descriptions, extract ski
 ## Dashboard Workflows
 
 - Review AI extraction before saving an application.
-- Browse applications and analyzed jobs in one list, with filters for all opportunities, applications, and jobs not yet applied to.
+- Browse saved applications in one list, with each analyzed job available from its application.
 - Track application stages, follow-ups, contacts, resume versions, and cover letters.
 - Open each saved application in one profile to update its details, documents, and outcomes; the list and job workspace lead to the same editor.
 - Inspect saved job descriptions with related skills and certifications.

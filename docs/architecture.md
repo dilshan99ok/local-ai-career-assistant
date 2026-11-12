@@ -6,14 +6,14 @@
 2. `Scripts/job_url.py` reads public HTML when a URL is supplied. The user can paste the description if the site blocks access.
 3. `Scripts/ai_helper.py` sends the description through `Scripts/ai_provider.py` and validates the extracted fields. The review screen allows corrections before saving.
 4. `App/app_utils/database.py` stores the job, application, extracted skills, status history, and follow-up details in SQLite.
-5. The Applications workspace lists tracked applications alongside analyzed jobs that have not been applied to. Each row opens its job workspace or application profile. The dashboard also shows the pipeline, skill demand, and resume fit.
+5. The Applications workspace lists tracked applications. Each row opens its job workspace or application profile. Job analysis and skill demand use jobs linked to a saved application.
 
 ## Components
 
 | Area | Primary files | Responsibility |
 | --- | --- | --- |
 | Dashboard and navigation | `App/dashboard.py`, `App/app_utils/navigation.py` | Sidebar pages, contextual job workspaces, back navigation |
-| Applications and opportunities | `App/app_pages/applications_page.py`, `App/app_pages/opportunities_page.py` | URL or pasted-description intake, unified list, pipeline, tracking, and application profile |
+| Applications | `App/app_pages/applications_page.py`, `App/app_pages/opportunities_page.py` | URL or pasted-description intake, application list, pipeline, tracking, and application profile |
 | Job details and skills | `App/app_pages/job_detail_page.py`, `App/app_pages/skills_page.py` | Per-job details and demand analysis |
 | Resumes and tailoring | `App/app_pages/resume_page.py`, `App/app_pages/tailoring_page.py` | Source CVs, local fit and gaps, resume and cover-letter drafts |
 | AI and authentication | `Scripts/ai_provider.py`, `Scripts/ai_helper.py`, `Scripts/chatgpt_auth.py` | ChatGPT sign-in, extraction, and generation |

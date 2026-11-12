@@ -1,4 +1,4 @@
-"""One list for tracked applications and jobs that have not been applied to."""
+"""One list of tracked applications, enriched by their analyzed job details."""
 
 import pandas as pd
 import streamlit as st
@@ -8,7 +8,7 @@ from App.app_utils.navigation import navigate_to
 
 
 COLUMNS = [
-    "kind", "job_id", "application_id", "company", "job_title", "domain",
+    "job_id", "application_id", "company", "job_title", "domain",
     "fit_display", "current_status", "date_applied", "follow_up_date",
     "source_file", "notes", "sort_at",
 ]
@@ -21,23 +21,28 @@ def clean_value(value):
     return "" if value.lower() in {"none", "nan"} else value
 
 
+def tracked_jobs(jobs_df, applications_df):
+    """Return analyzed jobs that belong to at least one saved application."""
+    if jobs_df.empty or applications_df.empty:
+        return jobs_df.iloc[0:0].copy()
+    sources = {clean_value(value) for value in applications_df["source_file"]}
+    sources.discard("")
+    return jobs_df[jobs_df["source_file"].map(clean_value).isin(sources)].copy()
+
+
 def build_opportunities_df(jobs_df, applications_df):
-    """Keep every application and add each analyzed job without an application."""
+    """Keep every application, including ones without an analyzed job."""
     jobs_by_source = {
         clean_value(row.get("source_file")): row
         for _, row in jobs_df.iterrows()
         if clean_value(row.get("source_file"))
     }
-    linked_sources = set()
     rows = []
 
     for _, application in applications_df.iterrows():
         source = clean_value(application.get("source_file"))
         job = jobs_by_source.get(source) if source else None
-        if job is not None:
-            linked_sources.add(source)
         rows.append({
-            "kind": "application",
             "job_id": int(job["id"]) if job is not None else None,
             "application_id": int(application["id"]),
             "company": clean_value(application.get("company")) or (clean_value(job.get("company")) if job is not None else ""),
@@ -52,35 +57,11 @@ def build_opportunities_df(jobs_df, applications_df):
             "sort_at": clean_value(application.get("date_applied")) or clean_value(application.get("created_at")),
         })
 
-    for _, job in jobs_df.iterrows():
-        source = clean_value(job.get("source_file"))
-        if source and source in linked_sources:
-            continue
-        rows.append({
-            "kind": "job",
-            "job_id": int(job["id"]),
-            "application_id": None,
-            "company": clean_value(job.get("company")),
-            "job_title": clean_value(job.get("job_title")),
-            "domain": clean_value(job.get("domain")),
-            "fit_display": clean_value(job.get("fit_display")),
-            "current_status": "Not applied",
-            "date_applied": "",
-            "follow_up_date": "",
-            "source_file": source,
-            "notes": "",
-            "sort_at": clean_value(job.get("analyzed_at")) or clean_value(job.get("created_at")),
-        })
-
     return pd.DataFrame(rows, columns=COLUMNS).sort_values("sort_at", ascending=False, kind="stable").reset_index(drop=True)
 
 
-def filter_opportunities(df, view, search, domain, status):
+def filter_opportunities(df, search, domain, status):
     filtered = df.copy()
-    if view == "Applications":
-        filtered = filtered[filtered["kind"] == "application"]
-    elif view == "Not applied":
-        filtered = filtered[filtered["kind"] == "job"]
     if domain != "All":
         filtered = filtered[filtered["domain"] == domain]
     if status != "All":
@@ -112,7 +93,7 @@ def open_opportunity(row):
 
 def render_opportunities_table(df):
     if df.empty:
-        st.info("No opportunities match these filters.")
+        st.info("No applications match these filters.")
         return
 
     rows_per_page = 10
@@ -123,7 +104,7 @@ def render_opportunities_table(df):
     start = (page - 1) * rows_per_page
     visible = df.iloc[start:start + rows_per_page]
     table = pd.DataFrame({
-        "row_key": [f"{row['kind']}:{int(row['application_id'] if row['kind'] == 'application' else row['job_id'])}" for _, row in visible.iterrows()],
+        "row_key": [int(value) for value in visible["application_id"]],
         "Company": [clean_value(value) or "Unknown company" for value in visible["company"]],
         "Job title": [clean_value(value) or "Untitled role" for value in visible["job_title"]],
         "Domain": [clean_value(value) or "Unclassified" for value in visible["domain"]],

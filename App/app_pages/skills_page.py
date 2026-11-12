@@ -6,6 +6,7 @@ import streamlit as st
 from App.app_utils.database import (
     get_certification_demand_rows_df,
     get_certification_normalization_rules_df,
+    get_applications_df,
     get_jobs_df,
     get_resume_profiles_df,
     get_skill_demand_rows_df,
@@ -13,6 +14,7 @@ from App.app_utils.database import (
     save_certification_normalization_rule,
     save_skill_normalization_rule,
 )
+from App.app_pages.opportunities_page import tracked_jobs
 from Scripts.skill_analysis import (
     build_certification_summary,
     build_skill_demand_summary,
@@ -269,8 +271,11 @@ def render_data_quality(skill_rows, cert_rows, custom_skill_rules, custom_cert_r
 def render_skills():
     st.title("Skills")
 
+    jobs_df = tracked_jobs(get_jobs_df(), get_applications_df())
     skill_rows = get_skill_demand_rows_df()
     cert_rows = get_certification_demand_rows_df()
+    skill_rows = skill_rows[skill_rows["job_id"].isin(jobs_df["id"])]
+    cert_rows = cert_rows[cert_rows["job_id"].isin(jobs_df["id"])]
     custom_skill_rules, custom_cert_rules = load_custom_rules()
 
     domains = ["All"]
@@ -306,7 +311,7 @@ def render_skills():
     )
     cert_summary = build_certification_summary(cert_rows, custom_rules=custom_cert_rules)
 
-    render_metrics(skill_summary, cert_summary, len(get_jobs_df()))
+    render_metrics(skill_summary, cert_summary, len(jobs_df))
     st.download_button(
         "Download canonical skills CSV",
         data=skill_summary.to_csv(index=False).encode("utf-8"),

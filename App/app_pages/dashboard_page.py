@@ -16,10 +16,10 @@ from App.app_utils.database import (
     get_resume_profiles_df,
     get_skill_demand_rows_df,
     get_status_summary_df,
-    get_top_skill_areas_df,
     get_applications_df,
 )
 from Scripts.job_fit import attach_fit_scores, build_job_fit_summary
+from App.app_pages.opportunities_page import tracked_jobs
 from App.app_utils.navigation import navigate_to
 
 
@@ -94,7 +94,7 @@ def render_quick_actions():
     if col1.button("＋ Add application", key="overview_analyze_job", type="primary", width="stretch"):
         st.session_state["open_add_application"] = True
         go_to("Applications")
-    if col2.button("View opportunities", key="overview_view_jobs", width="stretch"):
+    if col2.button("View applications", key="overview_view_jobs", width="stretch"):
         go_to("Applications")
     if col3.button("Review resume gaps", key="overview_review_gaps", width="stretch"):
         go_to("Resume & Gaps")
@@ -272,10 +272,11 @@ def render_recent_jobs(jobs_df):
 
 def render_dashboard():
     applications_df = get_applications_df()
-    jobs_df = get_jobs_df()
+    jobs_df = tracked_jobs(get_jobs_df(), applications_df)
     followups_df = get_dashboard_followups_df()
     profiles_df = get_resume_profiles_df()
     skill_rows_df = get_skill_demand_rows_df()
+    skill_rows_df = skill_rows_df[skill_rows_df["job_id"].isin(jobs_df["id"])]
     jobs_df = attach_fit_scores(jobs_df, skill_rows_df, profiles_df)
     fit_summary = build_job_fit_summary(jobs_df, skill_rows_df, profiles_df)
     render_header(jobs_df, applications_df, fit_summary)
@@ -284,6 +285,14 @@ def render_dashboard():
     st.divider()
     render_progress_charts(get_status_summary_df(), get_domains_df(), get_application_trend_df())
     st.divider()
-    render_market_signal(get_top_skill_areas_df(limit=6), get_domains_df())
+    skill_areas = skill_rows_df[
+        ~skill_rows_df["skill_basket"].isin([
+            "Documentation & Communication", "Service Desk & ITSM", "AI & Digital Productivity",
+        ])
+    ].groupby("skill_basket")["job_id"].nunique().reset_index(name="job_count")
+    skill_areas = skill_areas.rename(columns={"skill_basket": "skill_area"}).sort_values(
+        ["job_count", "skill_area"], ascending=[False, True]
+    ).head(6)
+    render_market_signal(skill_areas, get_domains_df())
     st.divider()
     render_recent_jobs(jobs_df)
