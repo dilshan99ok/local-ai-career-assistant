@@ -176,7 +176,6 @@ def apply_styles():
             background: transparent;
         }
 
-        .st-key-resume_cv_selected,
         [class*="st-key-resume_cv_"] {
             max-width: 1100px;
         }
@@ -191,7 +190,6 @@ def apply_styles():
             border-color: rgba(142,197,240,0.34) !important;
         }
 
-        .st-key-resume_cv_selected,
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.resume-card-selected) {
             border-color: rgba(115,186,244,0.7) !important;
             background: linear-gradient(90deg, rgba(90,154,213,0.13), rgba(90,154,213,0.025)) !important;
@@ -268,7 +266,6 @@ def apply_styles():
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .st-key-resume_cv_selected,
             div[data-testid="stVerticalBlockBorderWrapper"]:has(.resume-card-selected) {
                 animation: none;
             }

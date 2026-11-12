@@ -250,7 +250,7 @@ def render_profile_tab(profiles_df):
     for _, row in profiles_df.iterrows():
         profile_id = int(row["id"])
         is_selected = profile_id == selected_id
-        with st.container(border=True, key="resume_cv_selected" if is_selected else f"resume_cv_{profile_id}"):
+        with st.container(border=True, key=f"resume_cv_{profile_id}"):
             info_col, actions_col = st.columns([4.6, 2.2], vertical_alignment="center")
             with info_col:
                 label = escape(clean_value(row["profile_name"]))
@@ -277,8 +277,7 @@ def render_profile_tab(profiles_df):
                     "Set default", key=f"activate_resume_profile_{profile_id}",
                     type="tertiary", icon=":material/star_outline:",
                 ):
-                    with st.spinner("Setting default CV…"):
-                        set_active_resume_profile(profile_id)
+                    set_active_resume_profile(profile_id)
                     st.rerun()
                 if remove_col.button(
                     "Remove", key=f"remove_resume_profile_{profile_id}",
