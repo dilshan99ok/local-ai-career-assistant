@@ -21,7 +21,6 @@ from App.app_utils.database import (
     get_jobs_df,
     get_resume_profiles_df,
     get_skill_demand_rows_df,
-    import_applications_dataframe,
     get_duplicate_applications,
 )
 from Scripts.job_fit import attach_fit_scores
@@ -106,10 +105,6 @@ def get_valid_status(status):
 
 
 def render_success_messages():
-    import_result = st.session_state.pop("applications_import_result", None)
-    if import_result:
-        imported, skipped = import_result
-        st.success(f"Imported {imported} applications; skipped {skipped} rows.")
     if st.session_state.get("application_saved"):
         st.success("Application saved successfully.")
         st.session_state["application_saved"] = False
@@ -124,8 +119,11 @@ def render_success_messages():
 
 
 def render_add_application_form():
-    expand_form = bool(st.session_state.pop("open_add_application", False))
-    with st.expander("➕ Add application", expanded=expand_form):
+    if not st.session_state.get("show_add_application_form"):
+        render_pending_application_review()
+        return
+
+    with st.container(border=True):
         input_mode = st.radio(
             "How would you like to add it?",
             ["Job URL (recommended)", "Paste job description"],
@@ -209,6 +207,7 @@ def render_add_application_form():
                         "notes": "",
                         "duplicates": duplicate_df.to_dict("records"),
                     }
+                    st.session_state["show_add_application_form"] = False
                     st.rerun()
 
                 except json.JSONDecodeError:
@@ -465,6 +464,7 @@ def render_pending_application_review():
                             application_source=application_source,
                         )
                     st.session_state.pop("pending_application", None)
+                    st.session_state["show_add_application_form"] = False
                     st.session_state["application_saved"] = True
                     st.rerun()
                 except Exception as error:
@@ -472,6 +472,7 @@ def render_pending_application_review():
 
             if cancel_clicked:
                 st.session_state.pop("pending_application", None)
+                st.session_state["show_add_application_form"] = False
                 st.rerun()
 
         if st.button("Re-analyze this description", key="reanalyze_pending_application"):
@@ -828,13 +829,21 @@ def apply_application_filters(applications_df, search_text, selected_domain, sel
     return filtered_df
 
 def render_saved_applications(applications_df):
-    st.subheader("Saved Applications")
+    heading_col, export_col = st.columns([5, 1], vertical_alignment="bottom")
+    heading_col.subheader("Saved Applications")
+    if not applications_df.empty:
+        export_col.download_button(
+            "Export CSV",
+            data=applications_df.to_csv(index=False).encode("utf-8"),
+            file_name="ai_career_applications.csv",
+            mime="text/csv",
+            key="download_applications_csv",
+            type="tertiary",
+            icon=":material/download:",
+        )
 
     if applications_df.empty:
         st.info("No applications saved yet. Add your first application to start building your career workspace.")
-        if st.button("＋ Add application", key="applications_empty_add", type="primary"):
-            st.session_state["open_add_application"] = True
-            st.rerun()
         return
 
     search_text, selected_domain, selected_status = render_application_filters(applications_df)
@@ -1026,6 +1035,8 @@ def render_saved_applications(applications_df):
 
 def render_applications():
     render_success_messages()
+    if st.session_state.pop("open_add_application", False):
+        st.session_state["show_add_application_form"] = True
 
     applications_df = get_applications_df()
     editing_id = st.session_state.get("editing_application_id")
@@ -1059,38 +1070,15 @@ def render_applications():
     metric_col4.metric("Scheduled follow-ups", len(followups))
 
     action_col, _ = st.columns([1.5, 4])
-    if action_col.button("＋ Add application", key="applications_analyze_new", type="primary", width="stretch"):
-        st.session_state["open_add_application"] = True
+    is_adding = bool(st.session_state.get("show_add_application_form"))
+    if action_col.button(
+        "Close form" if is_adding else "＋ Add application",
+        key="applications_analyze_new",
+        type="secondary" if is_adding else "primary",
+        width="stretch",
+    ):
+        st.session_state["show_add_application_form"] = not is_adding
         st.rerun()
-
-    with st.expander("Import / export data", expanded=False):
-        if not applications_df.empty:
-            st.download_button(
-                "Download applications CSV",
-                data=applications_df.to_csv(index=False).encode("utf-8"),
-                file_name="ai_career_applications.csv",
-                mime="text/csv",
-                key="download_applications_csv",
-            )
-
-        uploaded_file = st.file_uploader(
-            "Import applications CSV",
-            type=["csv"],
-            key="applications_csv_upload",
-        )
-        if uploaded_file is not None and st.button(
-            "Import CSV",
-            key="import_applications_csv",
-        ):
-            try:
-                with st.spinner("Importing applications…", show_time=True):
-                    imported, skipped = import_applications_dataframe(
-                        pd.read_csv(uploaded_file)
-                    )
-                st.session_state["applications_import_result"] = (imported, skipped)
-                st.rerun()
-            except Exception as error:
-                st.error(f"Could not import CSV: {error}")
 
     render_add_application_form()
     render_saved_applications(applications_df)

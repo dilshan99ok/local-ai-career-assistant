@@ -164,16 +164,24 @@ def apply_styles():
             background: rgba(255,255,255,0.018);
         }
 
+        .st-key-resume_upload_panel {
+            max-width: 1100px;
+        }
+
         .st-key-resume_upload_panel [data-testid="stFileUploader"] {
-            padding: 1rem;
+            padding: 0.65rem;
             border: 1px dashed rgba(142,197,240,0.5);
             border-radius: 0.75rem;
             background: rgba(142,197,240,0.035);
         }
 
         .st-key-resume_upload_panel [data-testid="stFileUploaderDropzone"] {
-            min-height: 5.5rem;
+            min-height: 4.5rem;
             background: transparent;
+        }
+
+        .st-key-resume_upload_panel [class*="st-key-resume_upload_file_"] {
+            padding: 0.45rem 0.2rem;
         }
 
         [class*="st-key-resume_cv_"] {
@@ -216,6 +224,19 @@ def apply_styles():
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .resume-card-category {
+            display: inline-block;
+            margin-left: 0.6rem;
+            padding: 0.1rem 0.42rem;
+            border: 1px solid rgba(142,197,240,0.28);
+            border-radius: 999px;
+            color: #d4e9fa;
+            background: rgba(142,197,240,0.08);
+            font-size: 0.68rem;
+            font-weight: 650;
+            vertical-align: middle;
         }
 
         .resume-card-selected {

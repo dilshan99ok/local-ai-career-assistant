@@ -132,8 +132,10 @@ def render_add_cvs(profiles_df):
         errors = []
         with st.form(f"resume_batch_form_{generation}", enter_to_submit=False):
             for index, uploaded in enumerate(files):
-                with st.container(border=True):
-                    st.markdown(f"**{uploaded.name}**")
+                if index:
+                    st.divider()
+                with st.container(key=f"resume_upload_file_{generation}_{index}"):
+                    st.markdown(f"**{escape(uploaded.name)}**")
                     try:
                         with st.spinner(f"Reading {uploaded.name}…"):
                             extracted = cached_resume_text(uploaded.name, uploaded.getvalue())
@@ -144,7 +146,7 @@ def render_add_cvs(profiles_df):
                         st.error(str(error))
                         continue
 
-                    name_col, category_col = st.columns([2, 1])
+                    name_col, category_col = st.columns([1.3, 1], gap="medium")
                     name = name_col.text_input(
                         "CV name",
                         value=Path(uploaded.name).stem.replace("_", " ").replace("-", " ").title(),
@@ -200,7 +202,7 @@ def render_add_cvs(profiles_df):
 
     generation = st.session_state.get("resume_single_generation", 0)
     with st.form(f"resume_profile_form_{generation}", enter_to_submit=False):
-        name_col, category_col = st.columns([2, 1])
+        name_col, category_col = st.columns([1.3, 1], gap="medium")
         profile_name = name_col.text_input("CV name", key=f"resume_profile_name_editor_{generation}")
         category = category_col.selectbox(
             "Job category", PROFILE_CATEGORIES, key=f"resume_profile_category_editor_{generation}"
@@ -254,12 +256,13 @@ def render_profile_tab(profiles_df):
             info_col, actions_col = st.columns([4.6, 2.2], vertical_alignment="center")
             with info_col:
                 label = escape(clean_value(row["profile_name"]))
-                meta = [clean_value(row.get("target_domain")) or "General"]
-                meta.append(clean_value(row.get("source_filename")) or "Pasted text")
+                category = escape(clean_value(row.get("target_domain")) or "General")
+                filename = escape(clean_value(row.get("source_filename")) or "Pasted text")
+                category_badge = f'<span class="resume-card-category">{category}</span>'
                 badge = '<span class="resume-card-selected">Default</span>' if is_selected else ""
                 st.markdown(
-                    f'<div class="resume-card-name">{label}{badge}</div>'
-                    f'<div class="resume-card-meta">{escape(" · ".join(meta))}</div>',
+                    f'<div class="resume-card-name">{label}{category_badge}{badge}</div>'
+                    f'<div class="resume-card-meta">{filename}</div>',
                     unsafe_allow_html=True,
                 )
             with actions_col:
