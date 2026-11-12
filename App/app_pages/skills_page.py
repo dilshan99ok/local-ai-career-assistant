@@ -6,6 +6,7 @@ import streamlit as st
 from App.app_utils.database import (
     get_certification_demand_rows_df,
     get_certification_normalization_rules_df,
+    get_jobs_df,
     get_resume_profiles_df,
     get_skill_demand_rows_df,
     get_skill_normalization_rules_df,
@@ -45,12 +46,12 @@ def load_custom_rules():
     return skill_map, cert_map
 
 
-def render_metrics(skill_summary, cert_summary):
+def render_metrics(skill_summary, cert_summary, job_count):
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Canonical skills", len(skill_summary))
     col2.metric("Skill categories", skill_summary["Category"].nunique() if not skill_summary.empty else 0)
     col3.metric("Certifications", len(cert_summary))
-    col4.metric("Jobs analyzed", int(skill_summary["Jobs"].max()) if not skill_summary.empty else 0)
+    col4.metric("Jobs analyzed", job_count)
 
 
 def render_skill_overview(skill_rows, skill_summary, custom_rules):
@@ -72,7 +73,7 @@ def render_skill_overview(skill_rows, skill_summary, custom_rules):
                     "Last Seen": "Last seen",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -107,7 +108,7 @@ def render_skill_overview(skill_rows, skill_summary, custom_rules):
         ]
         if column in detail.columns
     ]
-    st.dataframe(detail[visible], use_container_width=True, hide_index=True)
+    st.dataframe(detail[visible], width="stretch", hide_index=True)
 
 
 def render_certifications(cert_rows, cert_summary, custom_rules):
@@ -139,7 +140,7 @@ def render_certifications(cert_rows, cert_summary, custom_rules):
                 "Requirement Levels": "Requirement levels",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -184,7 +185,7 @@ def render_certifications(cert_rows, cert_summary, custom_rules):
         ]
         if column in detail.columns
     ]
-    st.dataframe(detail[visible], use_container_width=True, hide_index=True)
+    st.dataframe(detail[visible], width="stretch", hide_index=True)
 
 
 def render_skill_gaps(skill_summary):
@@ -217,19 +218,23 @@ def render_skill_gaps(skill_summary):
     else:
         st.dataframe(
             gaps.sort_values(["Priority", "Skill"]),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
 
 def render_data_quality(skill_rows, cert_rows, custom_skill_rules, custom_cert_rules):
     st.subheader("Data quality and normalization")
+    if st.session_state.pop("skill_mapping_saved", False):
+        st.success("Skill mapping saved.")
+    if st.session_state.pop("certification_mapping_saved", False):
+        st.success("Certification mapping saved.")
     variants = find_skill_variants(skill_rows, custom_rules=custom_skill_rules)
     if variants.empty:
         st.success("No unresolved skill variants were detected.")
     else:
         st.caption("These canonical skills have multiple raw spellings in the source data.")
-        st.dataframe(variants, use_container_width=True, hide_index=True)
+        st.dataframe(variants, width="stretch", hide_index=True)
 
     with st.expander("Add or update a skill mapping", expanded=False):
         with st.form("skill_normalization_form", enter_to_submit=False):
@@ -239,8 +244,9 @@ def render_data_quality(skill_rows, cert_rows, custom_skill_rules, custom_cert_r
             submitted = st.form_submit_button("Save skill mapping")
             if submitted:
                 if alias.strip() and canonical.strip():
-                    save_skill_normalization_rule(alias, canonical, basket)
-                    st.success("Skill mapping saved.")
+                    with st.spinner("Saving skill mapping…"):
+                        save_skill_normalization_rule(alias, canonical, basket)
+                    st.session_state["skill_mapping_saved"] = True
                     st.rerun()
                 else:
                     st.error("Alias and canonical skill are required.")
@@ -252,8 +258,9 @@ def render_data_quality(skill_rows, cert_rows, custom_skill_rules, custom_cert_r
             submitted = st.form_submit_button("Save certification mapping")
             if submitted:
                 if alias.strip() and canonical.strip():
-                    save_certification_normalization_rule(alias, canonical)
-                    st.success("Certification mapping saved.")
+                    with st.spinner("Saving certification mapping…"):
+                        save_certification_normalization_rule(alias, canonical)
+                    st.session_state["certification_mapping_saved"] = True
                     st.rerun()
                 else:
                     st.error("Alias and canonical certification are required.")
@@ -299,7 +306,7 @@ def render_skills():
     )
     cert_summary = build_certification_summary(cert_rows, custom_rules=custom_cert_rules)
 
-    render_metrics(skill_summary, cert_summary)
+    render_metrics(skill_summary, cert_summary, len(get_jobs_df()))
     st.download_button(
         "Download canonical skills CSV",
         data=skill_summary.to_csv(index=False).encode("utf-8"),

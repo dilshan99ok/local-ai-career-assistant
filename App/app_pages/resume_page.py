@@ -46,6 +46,11 @@ def cached_docx_to_pdf(data):
     return docx_to_pdf(data)
 
 
+@st.cache_data(show_spinner=False, max_entries=16)
+def cached_resume_text(filename, data):
+    return extract_resume_text(filename, data)
+
+
 def display_pdf(data):
     encoded = base64.b64encode(data).decode("ascii")
     st.iframe(f"data:application/pdf;base64,{encoded}", height=680)
@@ -65,13 +70,15 @@ def show_resume_preview(profile_id, profile_name, resume_text):
         if uploaded and st.button("Attach file", key=f"attach_cv_source_button_{profile_id}"):
             candidate = uploaded.getvalue()
             try:
-                if not extract_resume_text(uploaded.name, candidate):
-                    raise ResumeImportError("No readable text found in this file.")
+                with st.spinner("Checking original CV…"):
+                    if not cached_resume_text(uploaded.name, candidate):
+                        raise ResumeImportError("No readable text found in this file.")
             except ResumeImportError as error:
                 st.error(str(error))
             else:
                 source_file = candidate
-                attach_resume_source_file(profile_id, uploaded.name, source_file)
+                with st.spinner("Attaching original CV…"):
+                    attach_resume_source_file(profile_id, uploaded.name, source_file)
                 filename = uploaded.name
 
     if source_file:
@@ -128,7 +135,8 @@ def render_add_cvs(profiles_df):
                 with st.container(border=True):
                     st.markdown(f"**{uploaded.name}**")
                     try:
-                        extracted = extract_resume_text(uploaded.name, uploaded.getvalue())
+                        with st.spinner(f"Reading {uploaded.name}…"):
+                            extracted = cached_resume_text(uploaded.name, uploaded.getvalue())
                         if not extracted:
                             raise ResumeImportError("No readable text found.")
                     except ResumeImportError as error:
@@ -170,15 +178,21 @@ def render_add_cvs(profiles_df):
             if any(not row[3] for row in prepared):
                 st.error("Each CV needs readable text.")
                 return
-            for name, category, filename, resume_text, source_file in prepared:
-                save_resume_profile(
-                    name, resume_text, extract_resume_skills(resume_text),
-                    source_filename=filename,
-                    source_type=Path(filename).suffix.upper().lstrip(".") or "File",
-                    source_file=source_file,
-                    details=extract_resume_details(resume_text),
-                    target_domain=category,
-                )
+            with st.spinner("Saving CVs…", show_time=True):
+                progress = st.progress(0, text="Saving CVs") if len(prepared) > 1 else None
+                for index, (name, category, filename, resume_text, source_file) in enumerate(prepared, 1):
+                    save_resume_profile(
+                        name, resume_text, extract_resume_skills(resume_text),
+                        source_filename=filename,
+                        source_type=Path(filename).suffix.upper().lstrip(".") or "File",
+                        source_file=source_file,
+                        details=extract_resume_details(resume_text),
+                        target_domain=category,
+                    )
+                    if progress:
+                        progress.progress(index / len(prepared), text=f"Saved {index} of {len(prepared)} CVs")
+                if progress:
+                    progress.empty()
             st.session_state["resume_batch_saved"] = len(prepared)
             st.session_state["resume_batch_generation"] = generation + 1
             st.rerun()
@@ -202,13 +216,14 @@ def render_add_cvs(profiles_df):
             elif profile_name.strip().casefold() in existing_names:
                 st.error("A CV with this name already exists.")
             else:
-                save_resume_profile(
-                    profile_name.strip(), resume_text,
-                    extract_resume_skills(resume_text),
-                    source_type="Pasted text",
-                    details=extract_resume_details(resume_text),
-                    target_domain=category,
-                )
+                with st.spinner("Saving CV…"):
+                    save_resume_profile(
+                        profile_name.strip(), resume_text,
+                        extract_resume_skills(resume_text),
+                        source_type="Pasted text",
+                        details=extract_resume_details(resume_text),
+                        target_domain=category,
+                    )
                 st.session_state["resume_single_saved"] = True
                 st.session_state["resume_single_generation"] = generation + 1
                 st.rerun()
@@ -262,7 +277,8 @@ def render_profile_tab(profiles_df):
                     "Set default", key=f"activate_resume_profile_{profile_id}",
                     type="tertiary", icon=":material/star_outline:",
                 ):
-                    set_active_resume_profile(profile_id)
+                    with st.spinner("Setting default CV…"):
+                        set_active_resume_profile(profile_id)
                     st.rerun()
                 if remove_col.button(
                     "Remove", key=f"remove_resume_profile_{profile_id}",
@@ -275,7 +291,8 @@ def render_profile_tab(profiles_df):
                 confirm_col, cancel_col = st.columns([1, 1])
                 if confirm_col.button("Remove CV", key=f"confirm_remove_resume_profile_{profile_id}",
                                       type="primary"):
-                    delete_resume_profile(profile_id)
+                    with st.spinner("Removing CV…"):
+                        delete_resume_profile(profile_id)
                     st.session_state.pop("confirm_remove_cv_id", None)
                     st.session_state["resume_profile_removed"] = True
                     st.rerun()

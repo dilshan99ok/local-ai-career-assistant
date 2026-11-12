@@ -93,6 +93,15 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(current_route(state), {"page": "Jobs", "job_id": 44})
         self.assertEqual(state["scroll_to_top"], 3)
 
+    def test_return_to_overview_clears_selected_recent_job(self):
+        state = {"current_page": "Overview", "overview_recent_jobs_reset": 2}
+        push_route(state, "Jobs", job_id=44)
+        apply_requested_route(state)
+        pop_route(state)
+        apply_requested_route(state)
+        self.assertEqual(current_route(state), {"page": "Overview", "job_id": None})
+        self.assertEqual(state["overview_recent_jobs_reset"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

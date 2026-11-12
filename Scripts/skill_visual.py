@@ -216,7 +216,7 @@ def build_skill_landscape_html(skill_summary: pd.DataFrame, canonical_rows: pd.D
       panel.style.animationDelay = `${categoryIndex * 35}ms`;
       const header = document.createElement("div");
       header.className = "category-header";
-      header.innerHTML = `<div class="category-name" title="${safe(category)}">${safe(category)}</div><div class="category-meta">${categorySkills.length} skills · ${categoryData.total} jobs</div>`;
+      header.innerHTML = `<div class="category-name" title="${safe(category)}">${safe(category)}</div><div class="category-meta">${categorySkills.length} skills · ${categoryData.total} skill requests</div>`;
       panel.appendChild(header);
       const skillWrap = document.createElement("div");
       skillWrap.className = "category-skills";

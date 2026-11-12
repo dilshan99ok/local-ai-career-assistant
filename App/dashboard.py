@@ -38,7 +38,7 @@ if st.sidebar.button(
     "＋ Add application",
     key="sidebar_add_application",
     type="primary",
-    use_container_width=True,
+    width="stretch",
 ):
     st.session_state["open_add_application"] = True
     st.session_state.pop("editing_application_id", None)
@@ -124,26 +124,30 @@ render_scroll_reset()
 render_back_navigation()
 
 if st.session_state.get("active_job_detail") and page == "Jobs":
-    render_job_detail()
+    renderer = render_job_detail
 elif st.session_state.get("active_job_detail"):
     st.session_state["active_job_detail"] = False
     st.session_state["jobs_table_reset"] = st.session_state.get("jobs_table_reset", 0) + 1
     page = st.session_state["current_page"]
+    renderer = None
+else:
+    renderer = None
 
-if not st.session_state.get("active_job_detail") and page == "Overview":
-    render_dashboard()
+if renderer is None:
+    renderer = {
+        "Overview": render_dashboard,
+        "Applications": render_applications,
+        "Skills": render_skills,
+        "Jobs": render_jobs,
+        "Resume & Gaps": render_resume,
+        "Tailoring Studio": render_tailoring,
+    }[page]
 
-elif not st.session_state.get("active_job_detail") and page == "Applications":
-    render_applications()
-
-elif not st.session_state.get("active_job_detail") and page == "Skills":
-    render_skills()
-
-elif not st.session_state.get("active_job_detail") and page == "Jobs":
-    render_jobs()
-
-elif not st.session_state.get("active_job_detail") and page == "Resume & Gaps":
-    render_resume()
-
-elif not st.session_state.get("active_job_detail") and page == "Tailoring Studio":
-    render_tailoring()
+load_revision = st.session_state.get("scroll_to_top", 0)
+if st.session_state.get("page_loaded_revision") != load_revision:
+    label = "job" if st.session_state.get("active_job_detail") else page.lower()
+    with st.spinner(f"Loading {label}…", show_time=True):
+        renderer()
+    st.session_state["page_loaded_revision"] = load_revision
+else:
+    renderer()

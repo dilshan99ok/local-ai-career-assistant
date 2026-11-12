@@ -1,4 +1,5 @@
 from datetime import date
+from html import escape
 
 import altair as alt
 import pandas as pd
@@ -89,12 +90,12 @@ def render_header(jobs_df, applications_df, fit_summary):
 def render_quick_actions():
     st.subheader("Quick actions")
     col1, col2, col3 = st.columns(3)
-    if col1.button("＋ Add application", key="overview_analyze_job", type="primary", use_container_width=True):
+    if col1.button("＋ Add application", key="overview_analyze_job", type="primary", width="stretch"):
         st.session_state["open_add_application"] = True
         go_to("Applications")
-    if col2.button("View job library", key="overview_view_jobs", use_container_width=True):
+    if col2.button("View job library", key="overview_view_jobs", width="stretch"):
         go_to("Jobs")
-    if col3.button("Review resume gaps", key="overview_review_gaps", use_container_width=True):
+    if col3.button("Review resume gaps", key="overview_review_gaps", width="stretch"):
         go_to("Resume & Gaps")
 
 
@@ -126,35 +127,37 @@ def render_next_actions(followups_df, fit_summary):
                         clean_value(row.get("job_title")) or "Untitled role",
                         key=f"overview_open_followup_{application_id}",
                         type="tertiary",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         open_job_workspace(job_id)
                 else:
                     st.markdown(
-                        f'<div class="overview-action-title">{clean_value(row.get("job_title")) or "Untitled role"}</div>',
+                        f'<div class="overview-action-title">{escape(clean_value(row.get("job_title")) or "Untitled role")}</div>',
                         unsafe_allow_html=True,
                     )
                 st.markdown(
-                    f'<div class="overview-action-meta">{clean_value(row.get("company")) or "Unknown company"}</div>',
+                    f'<div class="overview-action-meta">{escape(clean_value(row.get("company")) or "Unknown company")}</div>',
                     unsafe_allow_html=True,
                 )
             col2.markdown(
-                f'<div class="overview-state {state}">{label}</div>'
-                f'<div class="overview-action-meta">{clean_value(row.get("contact_name")) or "No contact recorded"}</div>',
+                f'<div class="overview-state {state}">{escape(label)}</div>'
+                f'<div class="overview-action-meta">{escape(clean_value(row.get("contact_name")) or "No contact recorded")}</div>',
                 unsafe_allow_html=True,
             )
             fit_display = clean_value(fit_row.get("fit_display")) if fit_row is not None else "—"
             col3.markdown(
-                f'<div class="overview-action-meta">FIT · {fit_display}</div>'
-                f'<div class="overview-action-title">{STATUS_LABELS.get(clean_value(row.get("current_status")), clean_value(row.get("current_status")) or "—")}</div>',
+                f'<div class="overview-action-meta">FIT · {escape(fit_display)}</div>'
+                f'<div class="overview-action-title">{escape(STATUS_LABELS.get(clean_value(row.get("current_status")), clean_value(row.get("current_status")) or "—"))}</div>',
                 unsafe_allow_html=True,
             )
             action_extend, action_clear = actions.columns(2)
             if action_extend.button("+7d", key=f"overview_extend_{application_id}"):
-                extend_application_follow_up(application_id, days=7)
+                with st.spinner("Rescheduling follow-up…"):
+                    extend_application_follow_up(application_id, days=7)
                 st.rerun()
             if action_clear.button("Clear", key=f"overview_clear_{application_id}"):
-                clear_application_follow_up(application_id)
+                with st.spinner("Clearing follow-up…"):
+                    clear_application_follow_up(application_id)
                 st.rerun()
 
 
@@ -171,7 +174,7 @@ def render_progress_charts(status_df, domains_df, trend_df):
                 color=alt.Color("status:N", legend=None),
                 tooltip=[alt.Tooltip("status:N", title="Status"), alt.Tooltip("count:Q", title="Applications")],
             ).properties(height=250)
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
     with right:
         st.subheader("Application activity")
         if trend_df.empty:
@@ -182,7 +185,7 @@ def render_progress_charts(status_df, domains_df, trend_df):
                 y=alt.Y("count:Q", title="Applications"),
                 tooltip=[alt.Tooltip("month:N", title="Month"), alt.Tooltip("count:Q", title="Applications")],
             ).properties(height=250)
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
 
 
 def render_market_signal(skill_areas_df, domains_df):
@@ -197,7 +200,7 @@ def render_market_signal(skill_areas_df, domains_df):
                 x=alt.X("job_count:Q", title="Jobs"),
                 tooltip=[alt.Tooltip("skill_area:N", title="Area"), alt.Tooltip("job_count:Q", title="Jobs")],
             ).properties(height=280)
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
     with right:
         st.subheader("Applications by domain")
         if domains_df.empty:
@@ -208,7 +211,7 @@ def render_market_signal(skill_areas_df, domains_df):
                 x=alt.X("count:Q", title="Applications"),
                 tooltip=[alt.Tooltip("domain:N", title="Domain"), alt.Tooltip("count:Q", title="Applications")],
             ).properties(height=280)
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
 
 
 def render_recent_jobs(jobs_df):
@@ -249,7 +252,7 @@ def render_recent_jobs(jobs_df):
         height=44 + len(table_df) * 54 + 4,
         theme="streamlit",
         update_on=["selectionChanged"],
-        key="overview_recent_jobs",
+        key=f"overview_recent_jobs_{st.session_state.get('overview_recent_jobs_reset', 0)}",
         show_toolbar=False,
         show_search=False,
         show_download_button=False,

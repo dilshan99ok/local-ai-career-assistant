@@ -290,6 +290,24 @@ def apply_styles():
             font-size: 2rem;
         }
 
+        [data-testid="stSpinner"] p {
+            color: #c9d9e8;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        button:focus-visible,
+        [role="tab"]:focus-visible,
+        [role="option"]:focus-visible {
+            outline: 2px solid #8ec5f0 !important;
+            outline-offset: 2px;
+        }
+
+        [data-testid="stTabs"] [role="tab"] {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
         /* Headings */
         h1 {
             margin-bottom: 0.35rem;

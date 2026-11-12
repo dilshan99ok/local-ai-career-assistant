@@ -90,9 +90,9 @@ def render_job_header(job, job_id, applications_df, fit):
         follow_up = clean_value(application.get("follow_up_date")) or "—"
 
     action_col1, action_col2, action_col3 = st.columns([1.35, 1.55, 3.3])
-    if action_col1.button("Tailor application", key=f"workspace_tailor_{job_id}", use_container_width=True):
+    if action_col1.button("Tailor application", key=f"workspace_tailor_{job_id}", width="stretch"):
         go_to_tailoring(job_id)
-    if action_col2.button("Add / update application", key=f"workspace_application_{job_id}", use_container_width=True):
+    if action_col2.button("Add / update application", key=f"workspace_application_{job_id}", width="stretch"):
         if applications_df.empty:
             st.session_state["open_add_application"] = True
         else:
@@ -139,7 +139,7 @@ def render_overview_tab(job, skills_df):
                     skills[visible].drop_duplicates().rename(
                         columns={"canonical_skill": "Skill", "requirement_level": "Requirement"}
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -178,7 +178,7 @@ def render_fit_tab(fit, profiles_df):
                 fit["matched"][["canonical_skill", "skill_basket"]].drop_duplicates().rename(
                     columns={"canonical_skill": "Skill", "skill_basket": "Category"}
                 ),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
     with gaps_tab:
@@ -189,7 +189,7 @@ def render_fit_tab(fit, profiles_df):
                 fit["missing"][["canonical_skill", "skill_basket", "requirement_level"]].drop_duplicates().rename(
                     columns={"canonical_skill": "Skill", "skill_basket": "Category", "requirement_level": "Requirement"}
                 ),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -289,7 +289,8 @@ def render_tracking_tab(applications_df):
                 )
             with action_col:
                 if st.button("Save status", key=f"workspace_save_status_{int(application['id'])}"):
-                    update_application_status(int(application["id"]), selected_status)
+                    with st.spinner("Updating application status…"):
+                        update_application_status(int(application["id"]), selected_status)
                     st.rerun()
             if st.button("Edit application", key=f"workspace_edit_application_{int(application['id'])}"):
                 st.session_state["editing_application_id"] = int(application["id"])
@@ -329,7 +330,7 @@ def render_job_detail():
         if certs_df.empty:
             st.info("No certifications were extracted for this role.")
         else:
-            st.dataframe(build_certification_summary(certs_df), use_container_width=True, hide_index=True)
+            st.dataframe(build_certification_summary(certs_df), width="stretch", hide_index=True)
     with fit_tab:
         render_fit_tab(fit, profiles_df)
     with packet_tab:

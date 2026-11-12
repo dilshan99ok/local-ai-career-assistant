@@ -252,7 +252,7 @@ def render_jobs_table(jobs_df):
         "Previous",
         disabled=current_page <= 1,
         key="jobs_previous_page",
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state["jobs_current_page"] = current_page - 1
         st.rerun()
@@ -264,7 +264,7 @@ def render_jobs_table(jobs_df):
         "Next",
         disabled=current_page >= total_pages,
         key="jobs_next_page",
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state["jobs_current_page"] = current_page + 1
         st.rerun()
@@ -292,7 +292,7 @@ def render_jobs():
         jobs_df["application_status"] = jobs_df["source_file"].map(status_by_source).fillna("Not applied")
 
     action_col, _ = st.columns([1.4, 4])
-    if action_col.button("＋ Add application", key="jobs_analyze_job", use_container_width=True):
+    if action_col.button("＋ Add application", key="jobs_analyze_job", width="stretch"):
         st.session_state["open_add_application"] = True
         navigate_to("Applications")
 

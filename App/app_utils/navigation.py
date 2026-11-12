@@ -54,6 +54,9 @@ def apply_requested_route(state):
         # AgGrid keeps row selection while a detail view is open. Remounting
         # clears only that selection; the search, filters, and page stay put.
         state["jobs_table_reset"] = state.get("jobs_table_reset", 0) + 1
+    elif destination["page"] == "Overview":
+        # Clear AgGrid's previous selection before reopening Overview.
+        state["overview_recent_jobs_reset"] = state.get("overview_recent_jobs_reset", 0) + 1
 
 
 def clear_sidebar_history(state):
@@ -62,6 +65,8 @@ def clear_sidebar_history(state):
     state.pop("requested_route", None)
     if state.get("current_page", state.get("selected_page")) == "Jobs":
         state["jobs_table_reset"] = state.get("jobs_table_reset", 0) + 1
+    if state.get("current_page", state.get("selected_page")) == "Overview":
+        state["overview_recent_jobs_reset"] = state.get("overview_recent_jobs_reset", 0) + 1
 
 
 def sidebar_navigate(state, page):
@@ -72,6 +77,8 @@ def sidebar_navigate(state, page):
         return False
     clear_sidebar_history(state)
     state["current_page"] = page
+    if page == "Overview":
+        state["overview_recent_jobs_reset"] = state.get("overview_recent_jobs_reset", 0) + 1
     state["scroll_to_top"] = state.get("scroll_to_top", 0) + 1
     state.pop("editing_application_id", None)
     return True

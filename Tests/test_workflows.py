@@ -22,6 +22,7 @@ from Scripts.tailoring import (
     build_follow_up_email_prompt,
     build_resume_tailoring_prompt,
 )
+from App.app_pages.tailoring_page import selected_application_context
 
 
 class WorkflowTests(unittest.TestCase):
@@ -54,6 +55,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("ai_extraction_cache", tables)
         self.assertIn("resume_profiles", tables)
         self.assertIn("application_messages", tables)
+
+    def test_follow_up_uses_selected_application_context(self):
+        applications = pd.DataFrame([
+            {"id": 11, "current_status": "Applied", "contact_name": "First"},
+            {"id": 12, "current_status": "Interview", "contact_name": "Second"},
+        ])
+        self.assertEqual(selected_application_context(applications, 12)["contact_name"], "Second")
+        self.assertEqual(selected_application_context(applications, None), {})
+        self.assertEqual(selected_application_context(applications, 99), {})
 
     def test_resume_preview_keeps_original_file_and_can_attach_legacy_file(self):
         source = build_resume_docx("# Example CV\nNetwork engineering")

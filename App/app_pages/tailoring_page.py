@@ -39,6 +39,13 @@ def clear_generated_documents():
         st.session_state.pop(key, None)
 
 
+def selected_application_context(applications_df, application_id):
+    if application_id is None or applications_df.empty:
+        return {}
+    matches = applications_df[applications_df["id"] == application_id]
+    return matches.iloc[0].to_dict() if not matches.empty else {}
+
+
 def render_tailoring():
     st.title("Tailoring Studio")
 
@@ -96,13 +103,14 @@ def render_tailoring():
             if not selected_job_row.empty:
                 st.caption(f"Resume fit · {clean_value(selected_job_row.iloc[0].get('fit_display')) or '—'}")
         with action_col:
-            if st.button("View workspace", key="tailoring_view_workspace", use_container_width=True):
+            if st.button("View workspace", key="tailoring_view_workspace", width="stretch"):
                 navigate_to("Jobs", job_id=int(job_id))
 
     if st.session_state.get("tailoring_source_job_id") != job_id:
         st.session_state.pop("tailoring_profile_selector", None)
         st.session_state.pop("tailoring_resume_version_selector", None)
         st.session_state.pop("saved_tailored_cv_selector", None)
+        st.session_state.pop("tailoring_application_selector", None)
         st.session_state["tailoring_source_job_id"] = job_id
         clear_generated_documents()
 
@@ -169,6 +177,7 @@ def render_tailoring():
         selected_application = st.selectbox(
             "Link generated documents to application",
             list(application_options),
+            index=1,
             key="tailoring_application_selector",
         )
         application_id = application_options[selected_application]
@@ -186,7 +195,7 @@ def render_tailoring():
         )
         if st.button("Generate resume output", key="generate_resume_output"):
             try:
-                with st.spinner("Preparing resume recommendations..."):
+                with st.spinner("Preparing resume recommendations…", show_time=True):
                     st.session_state["resume_tailoring_output"] = generate_resume_tailoring(
                         job,
                         resume_text,
@@ -215,9 +224,11 @@ def render_tailoring():
                 key="resume_tailoring_version_name",
             )
             if mode == "Tailored draft" and edited_output.strip():
+                with st.spinner("Preparing DOCX…"):
+                    docx_data = build_resume_docx(edited_output)
                 st.download_button(
                     "Download reviewed draft (.docx)",
-                    data=build_resume_docx(edited_output),
+                    data=docx_data,
                     file_name=safe_resume_filename(version_name),
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     key="download_resume_tailoring_draft",
@@ -227,15 +238,16 @@ def render_tailoring():
                     st.error("Add a version name and resume content before saving.")
                     return
                 version_type = "tailored" if mode == "Tailored draft" else "suggestions"
-                version_id = save_resume_version(
-                    version_name=version_name,
-                    content=edited_output,
-                    profile_id=profile_id,
-                    source_type=version_type,
-                    target_job_id=job_id,
-                    change_summary=st.session_state.get("resume_tailoring_mode_saved", "Suggestions"),
-                    application_id=application_id if version_type == "tailored" else None,
-                )
+                with st.spinner("Saving resume version…"):
+                    version_id = save_resume_version(
+                        version_name=version_name,
+                        content=edited_output,
+                        profile_id=profile_id,
+                        source_type=version_type,
+                        target_job_id=job_id,
+                        change_summary=st.session_state.get("resume_tailoring_mode_saved", "Suggestions"),
+                        application_id=application_id if version_type == "tailored" else None,
+                    )
                 st.success(f"Saved resume version #{version_id}.")
                 st.session_state.pop("resume_tailoring_output", None)
 
@@ -255,9 +267,11 @@ def render_tailoring():
                 "Saved tailored CV", list(draft_options), key="saved_tailored_cv_selector"
             )
             draft = draft_options[selected_draft]
+            with st.spinner("Preparing saved CV…"):
+                saved_docx = build_resume_docx(draft["content"])
             st.download_button(
                 "Download saved CV (.docx)",
-                data=build_resume_docx(draft["content"]),
+                data=saved_docx,
                 file_name=safe_resume_filename(draft["version_name"]),
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key="download_saved_tailored_cv",
@@ -276,7 +290,7 @@ def render_tailoring():
         )
         if st.button("Generate cover letter", key="generate_cover_letter"):
             try:
-                with st.spinner("Preparing cover letter..."):
+                with st.spinner("Preparing cover letter…", show_time=True):
                     st.session_state["cover_letter_output"] = generate_cover_letter(
                         job,
                         resume_text,
@@ -306,25 +320,29 @@ def render_tailoring():
                 key="cover_letter_status",
             )
             if st.button("Save cover letter version", key="save_cover_letter_version"):
-                version_id = save_cover_letter_version(
-                    version_name=cover_version_name,
-                    content=edited_cover,
-                    job_id=job_id,
-                    application_id=application_id,
-                    tone=tone,
-                    status=cover_status,
-                )
+                if not cover_version_name.strip() or not edited_cover.strip():
+                    st.error("Add a version name and cover letter before saving.")
+                    return
+                with st.spinner("Saving cover letter…"):
+                    version_id = save_cover_letter_version(
+                        version_name=cover_version_name,
+                        content=edited_cover,
+                        job_id=job_id,
+                        application_id=application_id,
+                        tone=tone,
+                        status=cover_status,
+                    )
                 st.success(f"Saved cover letter version #{version_id}.")
                 st.session_state.pop("cover_letter_output", None)
 
     with follow_up_tab:
         st.caption("Generate a concise, truthful follow-up draft linked to this job and application.")
-        application_context = applications_df.iloc[0].to_dict() if not applications_df.empty else {}
+        application_context = selected_application_context(applications_df, application_id)
         if not application_context:
             st.info("Link an application to this job before generating a follow-up email.")
         elif st.button("Generate follow-up email", key="generate_follow_up_email"):
             try:
-                with st.spinner("Preparing follow-up email..."):
+                with st.spinner("Preparing follow-up email…", show_time=True):
                     st.session_state["follow_up_email_output"] = generate_follow_up_email(
                         job,
                         resume_text,
@@ -348,11 +366,15 @@ def render_tailoring():
                 key="follow_up_message_status",
             )
             if st.button("Save follow-up email", key="save_follow_up_email"):
-                message_id = save_application_message(
-                    content=edited_follow_up,
-                    job_id=job_id,
-                    application_id=application_id,
-                    status=message_status,
-                )
+                if not edited_follow_up.strip():
+                    st.error("Add the follow-up email before saving.")
+                    return
+                with st.spinner("Saving follow-up email…"):
+                    message_id = save_application_message(
+                        content=edited_follow_up,
+                        job_id=job_id,
+                        application_id=application_id,
+                        status=message_status,
+                    )
                 st.success(f"Saved follow-up email #{message_id}.")
                 st.session_state.pop("follow_up_email_output", None)

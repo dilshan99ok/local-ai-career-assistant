@@ -106,6 +106,10 @@ def get_valid_status(status):
 
 
 def render_success_messages():
+    import_result = st.session_state.pop("applications_import_result", None)
+    if import_result:
+        imported, skipped = import_result
+        st.success(f"Imported {imported} applications; skipped {skipped} rows.")
     if st.session_state.get("application_saved"):
         st.success("Application saved successfully.")
         st.session_state["application_saved"] = False
@@ -153,7 +157,7 @@ def render_add_application_form():
                         if not source_url.strip():
                             st.error("Please enter the job posting URL first.")
                             return
-                        with st.spinner("Reading the job posting..."):
+                        with st.spinner("Reading the job posting…", show_time=True):
                             fetched_posting = fetch_job_posting(source_url)
                         job_description = fetched_posting["text"]
                         source_url = fetched_posting["url"]
@@ -162,7 +166,7 @@ def render_add_application_form():
                         st.error("Please paste the job description first.")
                         return
 
-                    with st.spinner("Analyzing job posting..."):
+                    with st.spinner("Analyzing job posting…", show_time=True):
                         extracted_data = analyze_jd_with_openai(job_description)
 
                         if not extracted_data.get("job_title"):
@@ -268,7 +272,7 @@ def render_pending_application_review():
         st.error("The previous analysis missed the job requirements in this description.")
         if st.button("Re-analyze full job description", key="retry_incomplete_jd_review", type="primary"):
             try:
-                with st.spinner("Analyzing the complete job description..."):
+                with st.spinner("Analyzing the complete job description…", show_time=True):
                     pending["extracted_data"] = analyze_jd_with_openai(
                         pending["job_description"], force_refresh=True
                     )
@@ -442,7 +446,7 @@ def render_pending_application_review():
                 extracted["responsibilities"] = parse_list_text(responsibilities)
 
                 try:
-                    with st.spinner("Saving application..."):
+                    with st.spinner("Saving application…"):
                         save_analyzed_application(
                             extracted_data=extracted,
                             date_applied=date_applied,
@@ -472,7 +476,7 @@ def render_pending_application_review():
 
         if st.button("Re-analyze this description", key="reanalyze_pending_application"):
             try:
-                with st.spinner("Re-analyzing job description..."):
+                with st.spinner("Re-analyzing job description…", show_time=True):
                     pending["extracted_data"] = analyze_jd_with_openai(
                         pending["job_description"],
                         force_refresh=True,
@@ -502,6 +506,7 @@ def render_application_profile(row):
     back_col, job_col = st.columns([1, 4])
     if back_col.button("← Applications", key="back_to_applications_list"):
         st.session_state["editing_application_id"] = None
+        st.session_state["scroll_to_top"] = st.session_state.get("scroll_to_top", 0) + 1
         st.rerun()
     if clean_value(row.get("source_file")) and job_col.button("View job workspace", key=f"profile_job_{row_id}"):
         open_application_workspace(row)
@@ -599,31 +604,36 @@ def render_application_profile(row):
                 st.error("Company and Job Title are required.")
                 return
 
-            update_application(
-                application_id=row_id,
-                company=company,
-                job_title=job_title,
-                domain=domain,
-                date_applied=date_applied,
-                follow_up_date=follow_up_date,
-                contact_name=contact_name,
-                contact_number=contact_number,
-                contact_email=contact_email,
-                contact_role=contact_role,
-                source_url=source_url,
-                location=location,
-                work_mode=work_mode,
-                application_source=application_source,
-                resume_version=resume_version,
-                cover_letter_status=cover_letter_status,
-                rejected_reason=rejected_reason,
-                interview_date=interview_date,
-                interview_stage=interview_stage,
-                offer_amount=offer_amount,
-                offer_date=offer_date,
-                current_status=current_status,
-                notes=notes
-            )
+            try:
+                with st.spinner("Saving application changes…"):
+                    update_application(
+                        application_id=row_id,
+                        company=company,
+                        job_title=job_title,
+                        domain=domain,
+                        date_applied=date_applied,
+                        follow_up_date=follow_up_date,
+                        contact_name=contact_name,
+                        contact_number=contact_number,
+                        contact_email=contact_email,
+                        contact_role=contact_role,
+                        source_url=source_url,
+                        location=location,
+                        work_mode=work_mode,
+                        application_source=application_source,
+                        resume_version=resume_version,
+                        cover_letter_status=cover_letter_status,
+                        rejected_reason=rejected_reason,
+                        interview_date=interview_date,
+                        interview_stage=interview_stage,
+                        offer_amount=offer_amount,
+                        offer_date=offer_date,
+                        current_status=current_status,
+                        notes=notes,
+                    )
+            except Exception as error:
+                st.error(f"Could not save changes: {error}")
+                return
 
             st.session_state["application_updated"] = True
             st.rerun()
@@ -639,14 +649,14 @@ def render_application_profile(row):
             if status_history.empty:
                 st.caption("No status history available.")
             else:
-                st.dataframe(status_history, use_container_width=True, hide_index=True)
+                st.dataframe(status_history, width="stretch", hide_index=True)
     with history_col2:
         with st.expander("Follow-up history", expanded=False):
             follow_up_history = get_follow_up_events_df(row_id)
             if follow_up_history.empty:
                 st.caption("No follow-up history available.")
             else:
-                st.dataframe(follow_up_history, use_container_width=True, hide_index=True)
+                st.dataframe(follow_up_history, width="stretch", hide_index=True)
 
 
 def render_delete_confirmation(row):
@@ -662,7 +672,12 @@ def render_delete_confirmation(row):
     confirm_col, cancel_col = st.columns([1, 5])
 
     if confirm_col.button("Yes, delete", key=f"confirm_delete_{row_id}"):
-        delete_application(row_id)
+        try:
+            with st.spinner("Deleting application…"):
+                delete_application(row_id)
+        except Exception as error:
+            st.error(f"Could not delete application: {error}")
+            return
 
         st.session_state["pending_delete_id"] = None
         st.session_state["application_deleted"] = True
@@ -676,7 +691,7 @@ def render_delete_confirmation(row):
 def render_status_control(row_id, current_status):
     display_status = STATUS_DISPLAY.get(current_status, current_status)
 
-    with st.popover(display_status, use_container_width=True):
+    with st.popover(display_status, width="stretch"):
         selected_status = st.radio(
             "Update status",
             STATUSES,
@@ -687,10 +702,15 @@ def render_status_control(row_id, current_status):
         )
 
         if selected_status != current_status:
-            update_application_status(
-                application_id=row_id,
-                current_status=selected_status
-            )
+            try:
+                with st.spinner("Updating status…"):
+                    update_application_status(
+                        application_id=row_id,
+                        current_status=selected_status,
+                    )
+            except Exception as error:
+                st.error(f"Could not update status: {error}")
+                return
             st.rerun()
 
 def render_application_filters(applications_df):
@@ -773,7 +793,7 @@ def render_application_pipeline(applications_df):
                     follow_up = clean_value(row.get("follow_up_date"))
                     if follow_up:
                         st.caption(f"Follow-up · {follow_up}")
-                    if st.button("Open workspace", key=f"pipeline_open_{row_id}", use_container_width=True):
+                    if st.button("Open workspace", key=f"pipeline_open_{row_id}", width="stretch"):
                         open_application_workspace(row)
             if len(rows) > 20:
                 st.caption(f"Showing 20 of {len(rows)}")
@@ -894,7 +914,7 @@ def render_saved_applications(applications_df):
             clean_value(row["job_title"]) or "—",
             key=f"application_open_job_{row_id}",
             type="tertiary",
-            use_container_width=True,
+            width="stretch",
         ):
             open_application_workspace(row)
         row_cols[2].write(clean_value(row["domain"]) or "—")
@@ -924,6 +944,7 @@ def render_saved_applications(applications_df):
         if edit_clicked:
             st.session_state["editing_application_id"] = row_id
             st.session_state["pending_delete_id"] = None
+            st.session_state["scroll_to_top"] = st.session_state.get("scroll_to_top", 0) + 1
             st.rerun()
 
         if delete_clicked:
@@ -969,7 +990,7 @@ def render_saved_applications(applications_df):
             "Previous",
             disabled=current_page <= 1,
             key="applications_previous_page",
-            use_container_width=True,
+            width="stretch",
         )
 
     with page_col:
@@ -992,7 +1013,7 @@ def render_saved_applications(applications_df):
             "Next",
             disabled=current_page >= total_pages,
             key="applications_next_page",
-            use_container_width=True,
+            width="stretch",
         )
 
     if previous_clicked:
@@ -1038,7 +1059,7 @@ def render_applications():
     metric_col4.metric("Scheduled follow-ups", len(followups))
 
     action_col, _ = st.columns([1.5, 4])
-    if action_col.button("＋ Add application", key="applications_analyze_new", type="primary", use_container_width=True):
+    if action_col.button("＋ Add application", key="applications_analyze_new", type="primary", width="stretch"):
         st.session_state["open_add_application"] = True
         st.rerun()
 
@@ -1062,10 +1083,11 @@ def render_applications():
             key="import_applications_csv",
         ):
             try:
-                imported, skipped = import_applications_dataframe(
-                    pd.read_csv(uploaded_file)
-                )
-                st.success(f"Imported {imported} applications; skipped {skipped} rows.")
+                with st.spinner("Importing applications…", show_time=True):
+                    imported, skipped = import_applications_dataframe(
+                        pd.read_csv(uploaded_file)
+                    )
+                st.session_state["applications_import_result"] = (imported, skipped)
                 st.rerun()
             except Exception as error:
                 st.error(f"Could not import CSV: {error}")
