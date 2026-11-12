@@ -5,7 +5,7 @@
 1. The user submits a public job URL or pastes a job description in the Streamlit dashboard.
 2. `Scripts/job_url.py` reads public HTML when a URL is supplied. The user can paste the description if the site blocks access.
 3. `Scripts/ai_helper.py` sends the description through `Scripts/ai_provider.py` and validates the extracted fields. The review screen allows corrections before saving.
-4. `App/app_utils/database.py` stores the job, application, extracted skills, status history, and follow-up details in SQLite.
+4. `App/app_utils/database.py` stores the job, application, extracted skills, status history, and follow-up details in SQLite. Applications reference analyzed jobs by `job_id`; application edits do not rewrite the shared job analysis.
 5. The Applications workspace lists tracked applications. Each row opens its job workspace or application profile. Job analysis and skill demand use jobs linked to a saved application.
 
 ## Components
@@ -22,15 +22,17 @@
 
 ## Data and files
 
-The SQLite database is under `Data/database/` and is excluded from Git. It contains saved jobs, applications, skill and certification data, resume profiles, job-specific CV recommendations, document drafts, and tracking history. Uploaded CVs retain extracted text and, for new uploads, the original file so the app can preview its layout. DOCX preview uses Microsoft Word on Windows to render a temporary PDF. Files uploaded before original-file storage was added can be attached from the CV preview.
+The live SQLite database defaults to `%LOCALAPPDATA%/AI Career Assistant/career_intelligence.db` on Windows (or the XDG data directory on other systems). On first launch, a database at the former `Data/database/career_intelligence.db` path is copied with SQLite's backup API. The old file remains in place. Set the `AI_CAREER_DB_PATH` environment variable to choose a different location. The database contains saved jobs, applications, skill and certification data, resume profiles, job-specific CV recommendations, document drafts, and tracking history. Uploaded CVs retain extracted text and, for new uploads, the original file so the app can preview its layout. DOCX preview uses Microsoft Word on Windows to render a temporary PDF. Files uploaded before original-file storage was added can be attached from the CV preview.
 
 ChatGPT OAuth credentials are stored outside the repository. `.env` files, the database, raw job descriptions, and processed exports are ignored by Git. The repository contains code and configuration examples only.
+
+Job extraction cache keys include the configured model and extraction revision. AI requests have a bounded timeout and one transient retry. URL fetching may still require pasted text when a job site blocks public access.
 
 ## Supported entry points
 
 - Start the dashboard: `python -m streamlit run App/dashboard.py`
 - Sign in for AI features: `python Scripts/sign_in_with_chatgpt.py`
-- Create or update the database schema: `python Scripts/create_database.py`
+- Create or update the database schema: `python -m Scripts.create_database`
 - Run the tests: `python -m unittest discover -s Tests -p 'test_*.py' -q`
 
-The first version's one-off database, report, and batch-pipeline scripts have been removed. `Scripts/create_database.py` remains the supported schema setup command.
+The first version's one-off database, report, and batch-pipeline scripts have been removed. `python -m Scripts.create_database` remains the supported schema setup command.

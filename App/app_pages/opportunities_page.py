@@ -25,23 +25,19 @@ def tracked_jobs(jobs_df, applications_df):
     """Return analyzed jobs that belong to at least one saved application."""
     if jobs_df.empty or applications_df.empty:
         return jobs_df.iloc[0:0].copy()
-    sources = {clean_value(value) for value in applications_df["source_file"]}
-    sources.discard("")
-    return jobs_df[jobs_df["source_file"].map(clean_value).isin(sources)].copy()
+    job_ids = set(pd.to_numeric(applications_df["job_id"], errors="coerce").dropna().astype(int))
+    return jobs_df[jobs_df["id"].isin(job_ids)].copy()
 
 
 def build_opportunities_df(jobs_df, applications_df):
     """Keep every application, including ones without an analyzed job."""
-    jobs_by_source = {
-        clean_value(row.get("source_file")): row
-        for _, row in jobs_df.iterrows()
-        if clean_value(row.get("source_file"))
-    }
+    jobs_by_id = {int(row["id"]): row for _, row in jobs_df.iterrows()}
     rows = []
 
     for _, application in applications_df.iterrows():
         source = clean_value(application.get("source_file"))
-        job = jobs_by_source.get(source) if source else None
+        linked_id = pd.to_numeric(application.get("job_id"), errors="coerce")
+        job = jobs_by_id.get(int(linked_id)) if pd.notna(linked_id) else None
         rows.append({
             "job_id": int(job["id"]) if job is not None else None,
             "application_id": int(application["id"]),

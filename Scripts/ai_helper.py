@@ -2,12 +2,9 @@ import json
 import hashlib
 import html
 import re
-import sqlite3
-import os
-from pathlib import Path
 from datetime import datetime, timedelta
 
-from Scripts.ai_provider import OpenAIProvider
+from Scripts.ai_provider import OpenAIProvider, configured_model
 from Scripts.skill_taxonomy import (
     get_allowed_skill_baskets_text,
     clean_skill_basket,
@@ -21,14 +18,12 @@ from App.app_utils.database import (
     save_cached_extraction,
     record_status_change,
     record_follow_up_event,
+    get_connection,
 )
 
 ALLOWED_BASKET_NAMES = set(
     get_allowed_skill_baskets_text().replace("- ", "").split("\n")
 )
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "Data" / "database" / "career_intelligence.db"
 
 # ---------------------------------------------------------------------
 # 1. OpenAI Helper
@@ -1168,7 +1163,10 @@ def analyze_jd_with_openai(job_description: str, force_refresh: bool = False) ->
     )
     # The previous cleaner could cache an extraction from an empty prompt when
     # a posting began with "About Us". Bump the key to avoid reusing it.
-    content_hash = hashlib.sha256(("jd-v3:" + normalized_description).encode("utf-8")).hexdigest()
+    model = configured_model()
+    content_hash = hashlib.sha256(
+        (f"jd-v4:{model}:" + normalized_description).encode("utf-8")
+    ).hexdigest()
 
     extracted_data = None if force_refresh else get_cached_extraction(content_hash)
 
@@ -1423,171 +1421,177 @@ def save_analyzed_application(
 
     extracted_data = clean_extracted_data(extracted_data)
 
-    connection = sqlite3.connect(DB_PATH)
-    cursor = connection.cursor()
+    connection = get_connection()
+    try:
+        cursor = connection.cursor()
 
-    company = extracted_data.get("company", "").strip()
-    job_title = extracted_data.get("job_title", "").strip()
-    domain = extracted_data.get("domain", "").strip()
+        company = extracted_data.get("company", "").strip()
+        job_title = extracted_data.get("job_title", "").strip()
+        domain = extracted_data.get("domain", "").strip()
 
-    source_file = f"streamlit_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    normalized_description = re.sub(
-        r"\s+",
-        " ",
-        normalize_job_description_text(job_description).lower(),
-    )
-    content_hash = (
-        hashlib.sha256(normalized_description.encode("utf-8")).hexdigest()
-        if normalized_description
-        else ""
-    )
-    extraction_model = os.getenv("OPENAI_MODEL", "gpt-6.1-sol")
-
-    cursor.execute(
-        """
-        INSERT INTO jobs
-        (
-            company, recruiter_name, parent_company, end_client_name,
-            end_client_industry, posting_type, job_title, domain, source_file, created_at,
-            raw_description, source_url, location, salary_range, work_mode,
-            application_source, content_hash, extraction_model,
-            extraction_version, analyzed_at
+        source_file = f"streamlit_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        normalized_description = re.sub(
+            r"\s+",
+            " ",
+            normalize_job_description_text(job_description).lower(),
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            company,
-            extracted_data.get("recruiter_name", "").strip(),
-            extracted_data.get("parent_company", "").strip(),
-            extracted_data.get("end_client_name", "").strip(),
-            extracted_data.get("end_client_industry", "").strip(),
-            extracted_data.get("posting_type", "").strip(),
-            job_title,
-            domain,
-            source_file,
+        content_hash = (
+            hashlib.sha256(normalized_description.encode("utf-8")).hexdigest()
+            if normalized_description
+            else ""
+        )
+        extraction_model = configured_model()
+
+        cursor.execute(
+            """
+            INSERT INTO jobs
+            (
+                company, recruiter_name, parent_company, end_client_name,
+                end_client_industry, posting_type, job_title, domain, source_file, created_at,
+                raw_description, source_url, location, salary_range, work_mode,
+                application_source, content_hash, extraction_model,
+                extraction_version, analyzed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                company,
+                extracted_data.get("recruiter_name", "").strip(),
+                extracted_data.get("parent_company", "").strip(),
+                extracted_data.get("end_client_name", "").strip(),
+                extracted_data.get("end_client_industry", "").strip(),
+                extracted_data.get("posting_type", "").strip(),
+                job_title,
+                domain,
+                source_file,
+                created_at,
+                job_description,
+                source_url,
+                location,
+                salary_range,
+                work_mode,
+                application_source,
+                content_hash,
+                extraction_model,
+                "2",
+                created_at,
+            ),
+        )
+
+        job_id = cursor.lastrowid
+
+        insert_items(
+            cursor,
+            job_id,
+            "technical_skill",
+            extracted_data.get("technical_skills", []),
+        )
+        insert_items(
+            cursor,
+            job_id,
+            "soft_skill",
+            extracted_data.get("soft_skills", []),
+        )
+        insert_items(
+            cursor,
+            job_id,
+            "tool_platform",
+            extracted_data.get("tools_platforms", []),
+        )
+        insert_items(
+            cursor,
+            job_id,
+            "certification",
+            extracted_data.get("certifications", []),
+        )
+        insert_items(
+            cursor,
+            job_id,
+            "domain_specific_skill",
+            extracted_data.get("domain_specific_skills", []),
+        )
+        insert_items(
+            cursor,
+            job_id,
+            "responsibility",
+            extracted_data.get("responsibilities", []),
+        )
+        insert_structured_skills(
+            cursor,
+            job_id,
+            extracted_data.get("structured_skills", []),
             created_at,
             job_description,
-            source_url,
-            location,
-            salary_range,
-            work_mode,
-            application_source,
-            content_hash,
-            extraction_model,
-            "2",
+        )
+
+        insert_structured_certifications(
+            cursor,
+            job_id,
+            extracted_data.get("structured_certifications", []),
             created_at,
-        ),
-    )
-
-    job_id = cursor.lastrowid
-
-    insert_items(
-        cursor,
-        job_id,
-        "technical_skill",
-        extracted_data.get("technical_skills", []),
-    )
-    insert_items(
-        cursor,
-        job_id,
-        "soft_skill",
-        extracted_data.get("soft_skills", []),
-    )
-    insert_items(
-        cursor,
-        job_id,
-        "tool_platform",
-        extracted_data.get("tools_platforms", []),
-    )
-    insert_items(
-        cursor,
-        job_id,
-        "certification",
-        extracted_data.get("certifications", []),
-    )
-    insert_items(
-        cursor,
-        job_id,
-        "domain_specific_skill",
-        extracted_data.get("domain_specific_skills", []),
-    )
-    insert_items(
-        cursor,
-        job_id,
-        "responsibility",
-        extracted_data.get("responsibilities", []),
-    )
-    insert_structured_skills(
-        cursor,
-        job_id,
-        extracted_data.get("structured_skills", []),
-        created_at,
-        job_description,
-    )
-
-    insert_structured_certifications(
-        cursor,
-        job_id,
-        extracted_data.get("structured_certifications", []),
-        created_at,
-        job_description,
-    )
-
-    cursor.execute(
-        """
-        INSERT INTO applications
-        (
-            company,
-            job_title,
-            domain,
-            source_file,
-            date_applied,
-            follow_up_date,
-            contact_name,
-            contact_number,
-            contact_email,
-            contact_role,
-            source_url,
-            location,
-            salary_range,
-            work_mode,
-            application_source,
-            resume_version,
-            cover_letter_status,
-            rejected_reason,
-            interview_date,
-            interview_stage,
-            offer_amount,
-            offer_date,
-            current_status,
-            notes,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            company, job_title, domain, source_file, str(date_applied),
-            str(follow_up_date), contact_name, contact_number, contact_email,
-            contact_role, source_url, location, salary_range, work_mode,
-            application_source, resume_version, cover_letter_status,
-            rejected_reason, interview_date, interview_stage, offer_amount,
-            offer_date, current_status, notes, created_at,
-        ),
-    )
-
-    application_id = cursor.lastrowid
-    record_status_change(application_id, current_status, connection=connection)
-    if follow_up_date:
-        record_follow_up_event(
-            application_id,
-            event_type="scheduled",
-            scheduled_for=follow_up_date,
-            connection=connection,
+            job_description,
         )
 
-    connection.commit()
-    connection.close()
+        cursor.execute(
+            """
+            INSERT INTO applications
+            (
+                job_id,
+                company,
+                job_title,
+                domain,
+                source_file,
+                date_applied,
+                follow_up_date,
+                contact_name,
+                contact_number,
+                contact_email,
+                contact_role,
+                source_url,
+                location,
+                salary_range,
+                work_mode,
+                application_source,
+                resume_version,
+                cover_letter_status,
+                rejected_reason,
+                interview_date,
+                interview_stage,
+                offer_amount,
+                offer_date,
+                current_status,
+                notes,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                job_id, company, job_title, domain, source_file, str(date_applied),
+                str(follow_up_date), contact_name, contact_number, contact_email,
+                contact_role, source_url, location, salary_range, work_mode,
+                application_source, resume_version, cover_letter_status,
+                rejected_reason, interview_date, interview_stage, offer_amount,
+                offer_date, current_status, notes, created_at,
+            ),
+        )
+
+        application_id = cursor.lastrowid
+        record_status_change(application_id, current_status, connection=connection)
+        if follow_up_date:
+            record_follow_up_event(
+                application_id,
+                event_type="scheduled",
+                scheduled_for=follow_up_date,
+                connection=connection,
+            )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 # ---------------------------------------------------------------------

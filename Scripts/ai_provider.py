@@ -17,6 +17,10 @@ ENV_VALUES = dotenv_values(BASE_DIR / ".env")
 
 DEFAULT_MODEL = "gpt-6.1-sol"
 
+
+def configured_model() -> str:
+    return os.getenv("OPENAI_MODEL") or ENV_VALUES.get("OPENAI_MODEL") or DEFAULT_MODEL
+
 JOB_EXTRACTION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -84,9 +88,7 @@ class OpenAIProvider:
     """Calls OpenAI through the user's ChatGPT sign-in."""
 
     def __init__(self, model: str | None = None):
-        self.model = model or os.getenv("OPENAI_MODEL") or ENV_VALUES.get(
-            "OPENAI_MODEL", DEFAULT_MODEL
-        )
+        self.model = model or configured_model()
         try:
             access_token = ChatGPTAuth().get_access_token()
         except ChatGPTAuthError as error:
@@ -95,7 +97,8 @@ class OpenAIProvider:
         self.client = OpenAI(
             api_key=access_token,
             base_url="https://api.openai.com/v1",
-            max_retries=0,
+            timeout=60.0,
+            max_retries=1,
         )
 
     def extract_job_data(self, prompt: str) -> dict:

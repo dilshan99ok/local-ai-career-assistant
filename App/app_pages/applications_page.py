@@ -512,9 +512,8 @@ def render_application_profile(row):
         st.session_state["editing_application_id"] = None
         st.session_state["scroll_to_top"] = st.session_state.get("scroll_to_top", 0) + 1
         st.rerun()
-    source_file = clean_value(row.get("source_file"))
-    jobs_df = get_jobs_df() if source_file else pd.DataFrame()
-    has_job = not jobs_df.empty and bool((jobs_df["source_file"] == source_file).any())
+    job_id = pd.to_numeric(row.get("job_id"), errors="coerce")
+    has_job = pd.notna(job_id)
     if has_job and job_col.button("View job details", key=f"profile_job_{row_id}"):
         open_application_workspace(row)
     st.title(clean_value(row["job_title"]) or "Application")
@@ -705,17 +704,15 @@ def render_delete_confirmation(row):
 
 
 def open_application_workspace(row):
-    jobs_df = get_jobs_df()
-    source_file = clean_value(row.get("source_file"))
-    matches = jobs_df[jobs_df["source_file"] == source_file] if source_file and not jobs_df.empty else pd.DataFrame()
-    if matches.empty:
+    job_id = pd.to_numeric(row.get("job_id"), errors="coerce")
+    if pd.isna(job_id):
         st.session_state["editing_application_id"] = int(row["id"])
         st.session_state["scroll_to_top"] = st.session_state.get("scroll_to_top", 0) + 1
         st.rerun()
         return
     st.session_state["selected_application_id"] = int(row["id"])
     st.session_state.pop("editing_application_id", None)
-    navigate_to("Applications", job_id=int(matches.iloc[0]["id"]))
+    navigate_to("Applications", job_id=int(job_id))
 
 
 def render_application_pipeline(applications_df):

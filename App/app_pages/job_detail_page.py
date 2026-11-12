@@ -340,7 +340,7 @@ def render_job_detail():
     job = job_df.iloc[0].to_dict()
     skills_df = get_job_skills_for_job_df(job_id)
     certs_df = get_job_certifications_for_job_df(job_id)
-    applications_df = get_applications_for_job_df(job.get("source_file", ""))
+    applications_df = get_applications_for_job_df(job_id)
     selected_application_id = st.session_state.get("selected_application_id")
     if selected_application_id is not None and not applications_df.empty:
         selected = applications_df[applications_df["id"] == selected_application_id]

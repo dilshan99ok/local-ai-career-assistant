@@ -1,13 +1,18 @@
 import sqlite3
 import json
 import uuid
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
 
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DB_PATH = BASE_DIR / "Data" / "database" / "career_intelligence.db"
+LEGACY_DB_PATH = BASE_DIR / "Data" / "database" / "career_intelligence.db"
+DEFAULT_DB_PATH = Path(
+    os.getenv("LOCALAPPDATA") or os.getenv("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+) / "AI Career Assistant" / "career_intelligence.db"
+DB_PATH = Path(os.getenv("AI_CAREER_DB_PATH") or DEFAULT_DB_PATH)
 _SCHEMA_READY = False
 
 
@@ -30,6 +35,7 @@ SCHEMA_COLUMNS = {
         "analyzed_at": "TEXT",
     },
     "applications": {
+        "job_id": "INTEGER REFERENCES jobs(id) ON DELETE SET NULL",
         "source_url": "TEXT",
         "location": "TEXT",
         "salary_range": "TEXT",
@@ -66,8 +72,23 @@ def initialize_database():
     global _SCHEMA_READY
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if DB_PATH == DEFAULT_DB_PATH and not DB_PATH.exists() and LEGACY_DB_PATH.exists():
+        # Use a consistent SQLite snapshot when moving the live database.
+        source = sqlite3.connect(f"file:{LEGACY_DB_PATH.as_posix()}?mode=ro", uri=True)
+        target = sqlite3.connect(DB_PATH)
+        try:
+            source.backup(target)
+        except Exception:
+            target.close()
+            DB_PATH.unlink(missing_ok=True)
+            raise
+        finally:
+            source.close()
+        target.close()
     connection = sqlite3.connect(DB_PATH)
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
+    connection.execute("PRAGMA journal_mode = WAL")
     cursor = connection.cursor()
 
     cursor.execute(
@@ -104,7 +125,7 @@ def initialize_database():
         """
         CREATE TABLE IF NOT EXISTS job_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL REFERENCES jobs(id),
             item_type TEXT NOT NULL,
             item_value TEXT NOT NULL
         )
@@ -114,7 +135,7 @@ def initialize_database():
         """
         CREATE TABLE IF NOT EXISTS job_skills (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL REFERENCES jobs(id),
             raw_skill TEXT,
             specific_skill TEXT NOT NULL,
             skill_basket TEXT NOT NULL,
@@ -126,7 +147,7 @@ def initialize_database():
         """
         CREATE TABLE IF NOT EXISTS job_certifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL REFERENCES jobs(id),
             raw_certification TEXT,
             certification_name TEXT NOT NULL,
             certification_short_name TEXT,
@@ -148,11 +169,23 @@ def initialize_database():
                     f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
                 )
 
+    # Link existing applications without changing their recorded application details.
+    cursor.execute(
+        """UPDATE applications
+           SET job_id = (SELECT j.id FROM jobs j WHERE j.source_file = applications.source_file)
+           WHERE job_id IS NULL AND source_file IS NOT NULL AND source_file != ''"""
+    )
+    for detail_table in ("job_items", "job_skills", "job_certifications"):
+        cursor.execute(
+            f"DELETE FROM {detail_table} WHERE NOT EXISTS "
+            f"(SELECT 1 FROM jobs WHERE jobs.id = {detail_table}.job_id)"
+        )
+
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS application_status_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            application_id INTEGER NOT NULL,
+            application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
             status TEXT NOT NULL,
             changed_at TEXT NOT NULL,
             note TEXT DEFAULT ''
@@ -163,7 +196,7 @@ def initialize_database():
         """
         CREATE TABLE IF NOT EXISTS follow_up_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            application_id INTEGER NOT NULL,
+            application_id INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
             event_type TEXT NOT NULL,
             scheduled_for TEXT,
             completed_at TEXT,
@@ -296,6 +329,7 @@ def initialize_database():
 
     for statement in (
         "CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(current_status)",
+        "CREATE INDEX IF NOT EXISTS idx_applications_job_id ON applications(job_id)",
         "CREATE INDEX IF NOT EXISTS idx_applications_date ON applications(date_applied)",
         "CREATE INDEX IF NOT EXISTS idx_applications_follow_up ON applications(follow_up_date)",
         "CREATE INDEX IF NOT EXISTS idx_jobs_domain ON jobs(domain)",
@@ -341,6 +375,19 @@ def initialize_database():
         (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
     )
 
+    # Older databases did not constrain these application references.
+    for history_table in ("application_status_history", "follow_up_events"):
+        cursor.execute(
+            f"DELETE FROM {history_table} WHERE NOT EXISTS "
+            f"(SELECT 1 FROM applications WHERE applications.id = {history_table}.application_id)"
+        )
+    for draft_table in ("cover_letter_versions", "application_messages"):
+        cursor.execute(
+            f"UPDATE {draft_table} SET application_id = NULL WHERE application_id IS NOT NULL "
+            f"AND NOT EXISTS (SELECT 1 FROM applications "
+            f"WHERE applications.id = {draft_table}.application_id)"
+        )
+
     connection.commit()
     connection.close()
     _SCHEMA_READY = True
@@ -353,6 +400,7 @@ def get_connection():
 
     connection = sqlite3.connect(DB_PATH)
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
     return connection
 
 
@@ -361,10 +409,10 @@ def load_data(query, params=None):
         params = ()
 
     connection = get_connection()
-    df = pd.read_sql_query(query, connection, params=params)
-    connection.close()
-
-    return df
+    try:
+        return pd.read_sql_query(query, connection, params=params)
+    finally:
+        connection.close()
 
 
 def _timestamp():
@@ -405,16 +453,16 @@ def get_job_certifications_for_job_df(job_id):
     )
 
 
-def get_applications_for_job_df(source_file):
+def get_applications_for_job_df(job_id):
     return load_data(
         """
         SELECT id, company, job_title, current_status, date_applied,
                follow_up_date, contact_name, contact_email
         FROM applications
-        WHERE source_file = ?
+        WHERE job_id = ?
         ORDER BY id DESC
         """,
-        params=(source_file,),
+        params=(job_id,),
     )
 
 
@@ -770,7 +818,7 @@ def import_applications_dataframe(dataframe):
 
         source_file = f"import_{uuid.uuid4().hex}"
         created_at = _timestamp()
-        connection.execute(
+        job_cursor = connection.execute(
             """
             INSERT INTO jobs
             (company, job_title, domain, source_file, created_at, source_url,
@@ -793,13 +841,14 @@ def import_applications_dataframe(dataframe):
         connection.execute(
             """
             INSERT INTO applications
-            (company, job_title, domain, source_file, date_applied,
+            (job_id, company, job_title, domain, source_file, date_applied,
              follow_up_date, contact_name, contact_number, contact_email,
              source_url, location, salary_range, work_mode,
              application_source, current_status, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                job_cursor.lastrowid,
                 company,
                 job_title,
                 value(row, "domain"),
@@ -837,6 +886,7 @@ def get_applications_df():
         """
         SELECT
             id,
+            job_id,
             company,
             job_title,
             domain,
@@ -877,14 +927,13 @@ def get_dashboard_followups_df():
             a.company,
             a.job_title,
             a.source_file,
-            j.id AS job_id,
+            a.job_id,
             follow_up_date,
             contact_name,
             contact_number,
             current_status,
             notes
         FROM applications a
-        LEFT JOIN jobs j ON j.source_file = a.source_file
         WHERE a.follow_up_date IS NOT NULL
           AND a.follow_up_date != ''
           AND LOWER(a.follow_up_date) != 'none'
@@ -1393,18 +1442,6 @@ def update_application(
     current_status = current_status.strip()
     notes = notes.strip()
 
-    cursor.execute(
-        """
-        SELECT source_file
-        FROM applications
-        WHERE id = ?
-        """,
-        (application_id,),
-    )
-
-    result = cursor.fetchone()
-    source_file = result[0] if result else None
-
     previous_status_row = cursor.execute(
         "SELECT current_status, follow_up_date FROM applications WHERE id = ?",
         (application_id,),
@@ -1490,33 +1527,6 @@ def update_application(
                 completed_at=_timestamp(),
                 connection=connection,
             )
-
-    if source_file:
-        cursor.execute(
-            """
-            UPDATE jobs
-            SET company = ?,
-                job_title = ?,
-                domain = ?,
-                source_url = ?,
-                location = ?,
-                salary_range = ?,
-                work_mode = ?,
-                application_source = ?
-            WHERE source_file = ?
-            """,
-            (
-                company,
-                job_title,
-                domain,
-                source_url,
-                location,
-                salary_range,
-                work_mode,
-                application_source,
-                source_file,
-            ),
-        )
 
     connection.commit()
     connection.close()
@@ -1628,6 +1638,16 @@ def delete_application(application_id):
     connection = get_connection()
     try:
         with connection:
+            for history_table in ("application_status_history", "follow_up_events"):
+                connection.execute(
+                    f"DELETE FROM {history_table} WHERE application_id = ?",
+                    (int(application_id),),
+                )
+            for draft_table in ("cover_letter_versions", "application_messages"):
+                connection.execute(
+                    f"UPDATE {draft_table} SET application_id = NULL WHERE application_id = ?",
+                    (int(application_id),),
+                )
             connection.execute("DELETE FROM applications WHERE id = ?", (int(application_id),))
     finally:
         connection.close()

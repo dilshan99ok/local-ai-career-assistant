@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -34,13 +35,10 @@ class WorkflowTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "career.db"
         self.database_path_patch = patch.object(database, "DB_PATH", self.db_path)
-        self.helper_path_patch = patch.object(ai_helper, "DB_PATH", self.db_path)
         self.database_path_patch.start()
-        self.helper_path_patch.start()
         database.initialize_database()
 
     def tearDown(self):
-        self.helper_path_patch.stop()
         self.database_path_patch.stop()
         self.temp_dir.cleanup()
 
@@ -61,6 +59,32 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("job_resume_recommendations", tables)
         self.assertIn("application_messages", tables)
 
+    def test_first_launch_moves_legacy_database_with_sqlite_backup(self):
+        legacy = Path(self.temp_dir.name) / "old" / "career.db"
+        target = Path(self.temp_dir.name) / "local" / "career.db"
+        legacy.parent.mkdir()
+        source = sqlite3.connect(legacy)
+        source.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, company TEXT, job_title TEXT, domain TEXT, source_file TEXT UNIQUE, created_at TEXT)")
+        source.execute("INSERT INTO jobs (id, company, job_title, source_file) VALUES (1, 'Legacy company', 'Engineer', 'legacy')")
+        source.commit()
+        source.close()
+        with patch.object(database, "LEGACY_DB_PATH", legacy), \
+             patch.object(database, "DEFAULT_DB_PATH", target), \
+             patch.object(database, "DB_PATH", target):
+            database.initialize_database()
+            self.assertEqual(database.get_job_detail_df(1).iloc[0]["company"], "Legacy company")
+            self.assertTrue(legacy.exists())
+
+    def test_schema_upgrade_removes_orphaned_job_details(self):
+        connection = sqlite3.connect(self.db_path)
+        connection.execute(
+            "INSERT INTO job_skills (job_id, specific_skill, skill_basket) VALUES (999, 'Old skill', 'Other')"
+        )
+        connection.commit()
+        connection.close()
+        database.initialize_database()
+        self.assertEqual(len(database.load_data("SELECT * FROM job_skills WHERE job_id = 999")), 0)
+
     def test_follow_up_uses_selected_application_context(self):
         applications = pd.DataFrame([
             {"id": 11, "current_status": "Applied", "contact_name": "First"},
@@ -76,9 +100,9 @@ class WorkflowTests(unittest.TestCase):
             {"id": 2, "source_file": "job-only", "company": "B", "job_title": "Support", "domain": "IT Support", "fit_display": "", "created_at": "2026-11-02"},
         ])
         applications = pd.DataFrame([
-            {"id": 10, "source_file": "linked", "company": "A", "job_title": "Engineer", "domain": "Networking", "current_status": "Applied", "date_applied": "2026-11-03"},
-            {"id": 11, "source_file": "linked", "company": "A", "job_title": "Engineer", "domain": "Networking", "current_status": "Interview", "date_applied": "2026-11-04"},
-            {"id": 12, "source_file": "missing", "company": "C", "job_title": "Admin", "domain": "Cloud", "current_status": "Applied", "date_applied": "2026-11-05"},
+            {"id": 10, "job_id": 1, "source_file": "linked", "company": "A", "job_title": "Engineer", "domain": "Networking", "current_status": "Applied", "date_applied": "2026-11-03"},
+            {"id": 11, "job_id": 1, "source_file": "linked", "company": "A", "job_title": "Engineer", "domain": "Networking", "current_status": "Interview", "date_applied": "2026-11-04"},
+            {"id": 12, "job_id": None, "source_file": "missing", "company": "C", "job_title": "Admin", "domain": "Cloud", "current_status": "Applied", "date_applied": "2026-11-05"},
         ])
         combined = build_opportunities_df(jobs, applications)
         self.assertEqual(len(combined), 3)
@@ -99,6 +123,18 @@ class WorkflowTests(unittest.TestCase):
             ("A", "Engineer", "Networking", "linked"),
         )
         application_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+        connection.execute(
+            "INSERT INTO application_status_history (application_id, status, changed_at) VALUES (?, 'Applied', '2026-11-13')",
+            (application_id,),
+        )
+        connection.execute(
+            "INSERT INTO follow_up_events (application_id, event_type, created_at) VALUES (?, 'scheduled', '2026-11-13')",
+            (application_id,),
+        )
+        connection.execute(
+            "INSERT INTO cover_letter_versions (application_id, version_name, content, created_at) VALUES (?, 'Draft', 'Text', '2026-11-13')",
+            (application_id,),
+        )
         connection.commit()
         connection.close()
 
@@ -108,6 +144,39 @@ class WorkflowTests(unittest.TestCase):
         combined = build_opportunities_df(database.get_jobs_df(), database.get_applications_df())
         self.assertTrue(combined.empty)
         self.assertTrue(tracked_jobs(database.get_jobs_df(), database.get_applications_df()).empty)
+        self.assertEqual(len(database.load_data("SELECT * FROM application_status_history")), 0)
+        self.assertEqual(len(database.load_data("SELECT * FROM follow_up_events")), 0)
+        self.assertTrue(pd.isna(database.load_data("SELECT application_id FROM cover_letter_versions").iloc[0]["application_id"]))
+
+    def test_legacy_links_migrate_and_application_edits_do_not_change_shared_job(self):
+        connection = sqlite3.connect(self.db_path)
+        connection.execute("INSERT INTO jobs (id, company, job_title, domain, source_file) VALUES (1, 'Original', 'Engineer', 'Networking', 'linked')")
+        connection.executemany(
+            "INSERT INTO applications (company, job_title, domain, source_file) VALUES (?, ?, ?, ?)",
+            [("Original", "Engineer", "Networking", "linked")] * 2,
+        )
+        connection.commit()
+        connection.close()
+
+        database.initialize_database()
+        applications = database.get_applications_df()
+        self.assertEqual(set(applications["job_id"]), {1})
+        self.assertEqual(len(database.get_applications_for_job_df(1)), 2)
+
+        database.update_application(
+            application_id=int(applications.iloc[0]["id"]),
+            company="Application employer", job_title="Application title", domain="IT Support",
+            date_applied="2026-11-13", follow_up_date="", contact_name="",
+            contact_number="", current_status="Applied", notes="",
+        )
+        self.assertEqual(database.get_job_detail_df(1).iloc[0]["company"], "Original")
+        self.assertEqual(database.get_applications_for_job_df(1).iloc[0]["company"], "Application employer")
+        self.assertEqual(database.get_applications_for_job_df(1).iloc[1]["company"], "Original")
+
+        connection = database.get_connection()
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("UPDATE applications SET job_id = 999 WHERE id = ?", (int(applications.iloc[0]["id"]),))
+        connection.close()
 
     def test_resume_preview_keeps_original_file_and_can_attach_legacy_file(self):
         source = build_resume_docx("# Example CV\nNetwork engineering")
@@ -311,8 +380,9 @@ class WorkflowTests(unittest.TestCase):
 
         connection = sqlite3.connect(self.db_path)
         application = connection.execute(
-            "SELECT job_title, contact_email, source_url, work_mode FROM applications"
+            "SELECT job_title, contact_email, source_url, work_mode, job_id FROM applications"
         ).fetchone()
+        saved_job_id = connection.execute("SELECT id FROM jobs").fetchone()[0]
         status_history = connection.execute(
             "SELECT status FROM application_status_history"
         ).fetchone()
@@ -326,9 +396,22 @@ class WorkflowTests(unittest.TestCase):
             "recruiter@example.com",
             "https://example.com/job",
             "Hybrid",
+            saved_job_id,
         ))
         self.assertEqual(status_history[0], "Applied")
         self.assertEqual(follow_up_history, ("scheduled", "2026-11-10"))
+
+    def test_failed_application_save_rolls_back_job_and_application(self):
+        extracted = {"company": "Example", "job_title": "Engineer", "domain": "Networking"}
+        with patch.object(ai_helper, "insert_structured_skills", side_effect=RuntimeError("write failed")):
+            with self.assertRaisesRegex(RuntimeError, "write failed"):
+                ai_helper.save_analyzed_application(
+                    extracted_data=extracted, date_applied="2026-11-13", follow_up_date="",
+                    contact_name="", contact_number="", current_status="Applied", notes="",
+                    job_description="Example Engineer role",
+                )
+        self.assertTrue(database.get_jobs_df().empty)
+        self.assertTrue(database.get_applications_df().empty)
 
     def test_resume_skill_matching_is_local_and_canonical(self):
         skills = extract_resume_skills(
@@ -485,6 +568,23 @@ Nornir, NAPALM and NetBox is required.
         self.assertIn("MPLS", ask.call_args.args[0])
         self.assertIn("NetBox", ask.call_args.args[0])
         self.assertIn("MPLS", result["technical_skills"])
+
+    def test_extraction_cache_changes_with_model(self):
+        class FakeProvider:
+            def __init__(self):
+                self.model = os.environ["OPENAI_MODEL"]
+
+        description = "Network Engineer maintaining BGP networks."
+        extracted = {"company": "Example", "job_title": "Network Engineer", "domain": "Networking"}
+        with patch.object(ai_helper, "OpenAIProvider", side_effect=FakeProvider), \
+             patch.object(ai_helper, "ask_openai", return_value=extracted) as ask:
+            with patch.dict(os.environ, {"OPENAI_MODEL": "test-model-a"}):
+                ai_helper.analyze_jd_with_openai(description)
+                ai_helper.analyze_jd_with_openai(description)
+            with patch.dict(os.environ, {"OPENAI_MODEL": "test-model-b"}):
+                ai_helper.analyze_jd_with_openai(description)
+        self.assertEqual(ask.call_count, 2)
+        self.assertEqual(len(database.load_data("SELECT content_hash FROM ai_extraction_cache")), 2)
 
     def test_related_job_title_and_stock_exchange_do_not_pollute_extraction(self):
         description = (

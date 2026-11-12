@@ -180,7 +180,7 @@ def render_tailoring():
         st.warning("The selected resume version is empty.")
         return
 
-    applications_df = get_applications_for_job_df(job.get("source_file", ""))
+    applications_df = get_applications_for_job_df(job_id)
     application_id = None
     if not applications_df.empty:
         application_options = {"No linked application": None}

@@ -45,6 +45,8 @@ The application uses Sign in with ChatGPT for eligible structured job-descriptio
 3. Run `python Scripts/sign_in_with_chatgpt.py` once and approve ChatGPT plan usage in the browser.
 4. Run the app with `python -m streamlit run App/dashboard.py`.
 
+The live SQLite database is stored in `%LOCALAPPDATA%/AI Career Assistant/` on Windows. The first launch copies an existing database from `Data/database/` to that location; the old file is retained. Set `AI_CAREER_DB_PATH` as an environment variable if you need a different location.
+
 The sign-in flow uses a browser-based OAuth callback and stores its refresh token outside the project. It does not require an OpenAI API key or API credits; availability depends on the ChatGPT account's plan-sharing eligibility.
 
 The CV pool analysis sends the job description and extracted text from every uploaded CV to OpenAI only when **Analyze CV pool** is selected. Long CVs may be shortened for the comparison. Generated suggestions should be reviewed before use.
