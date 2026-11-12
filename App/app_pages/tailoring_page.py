@@ -5,6 +5,8 @@ from App.app_utils.database import (
     get_applications_for_job_df,
     get_application_messages_df,
     get_job_detail_df,
+    get_job_resume_recommendation,
+    get_job_skills_for_job_df,
     get_jobs_df,
     get_resume_profiles_df,
     get_resume_versions_df,
@@ -14,10 +16,10 @@ from App.app_utils.database import (
     save_resume_version,
 )
 from App.app_pages.opportunities_page import tracked_jobs
-from Scripts.job_fit import attach_fit_scores
+from Scripts.job_fit import attach_fit_scores, rank_resume_profiles
+from Scripts.resume_recommendation import recommendation_fingerprint
 from App.app_utils.navigation import navigate_to
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
-from Scripts.resume_profiles import choose_profile
 from Scripts.tailoring import (
     generate_cover_letter,
     generate_follow_up_email,
@@ -117,24 +119,32 @@ def render_tailoring():
         st.session_state["tailoring_source_job_id"] = job_id
         clear_generated_documents()
 
-    recommended = choose_profile(profiles_df, clean_value(job.get("domain")))
+    rankings = rank_resume_profiles(
+        get_job_skills_for_job_df(job_id), profiles_df, clean_value(job.get("domain"))
+    )
+    saved_recommendation = get_job_resume_recommendation(
+        job_id, recommendation_fingerprint(job, profiles_df)
+    )
+    recommended_id = (
+        int(saved_recommendation["selected_profile_id"])
+        if saved_recommendation and int(saved_recommendation["selected_profile_id"]) in set(profiles_df["id"].astype(int))
+        else int(rankings.iloc[0]["profile_id"])
+    )
     profile_options = {}
     for _, row in profiles_df.iterrows():
         label = (
             f"{clean_value(row['profile_name'])} · "
             f"{clean_value(row.get('target_domain')) or 'General'}"
         )
-        if row["is_active"]:
-            label += " · active"
         profile_options[label] = row
     profile_labels = list(profile_options)
     recommended_index = next(
         (index for index, label in enumerate(profile_labels)
-         if int(profile_options[label]["id"]) == int(recommended["id"])),
+         if int(profile_options[label]["id"]) == recommended_id),
         0,
     )
     selected_profile_label = st.selectbox(
-        "Starting CV",
+        "Starting CV" + (" (AI recommended)" if saved_recommendation else " (best skill overlap suggested)"),
         profile_labels,
         index=recommended_index,
         key="tailoring_profile_selector",

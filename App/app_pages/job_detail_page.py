@@ -8,11 +8,14 @@ from App.app_utils.database import (
     get_job_certifications_for_job_df,
     get_job_detail_df,
     get_job_skills_for_job_df,
+    get_job_resume_recommendation,
     get_resume_profiles_df,
     get_resume_versions_df,
+    save_job_resume_recommendation,
     update_application_status,
 )
 from Scripts.job_fit import build_fit_snapshot
+from Scripts.resume_recommendation import generate_resume_recommendation, recommendation_fingerprint
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
 from App.app_utils.navigation import go_back, navigate_to
 from Scripts.skill_analysis import build_certification_summary, canonicalize_skill_rows
@@ -41,15 +44,16 @@ def go_to_opportunities():
 
 
 def go_to_tailoring(job_id):
+    st.session_state.pop("tailoring_profile_selector", None)
     navigate_to("Tailoring Studio", job_id=int(job_id))
 
 
 def render_fit_metric(fit):
     score = fit["score"]
     if score is None:
-        st.metric("Resume fit", "—", help="Create a resume profile to calculate a local skill comparison.")
+        st.metric("CV skill overlap", "—", help="Upload a CV to compare its detected skills with this role.")
     else:
-        st.metric("Resume fit", f"{score}%", help="Distinct extracted job skills found in the selected resume profile.")
+        st.metric("CV skill overlap", f"{score}%", help="Share of extracted job skills found in the selected CV. This is not a hiring probability.")
 
 
 def render_job_header(job, job_id, applications_df, fit):
@@ -89,10 +93,10 @@ def render_job_header(job, job_id, applications_df, fit):
         )
         follow_up = clean_value(application.get("follow_up_date")) or "—"
 
-    action_col1, action_col2, action_col3 = st.columns([1.35, 1.55, 3.3])
+    action_col1, action_col2, action_col3 = st.columns(3)
     if action_col1.button("Tailor application", key=f"workspace_tailor_{job_id}", width="stretch"):
         go_to_tailoring(job_id)
-    if action_col2.button("Add / update application", key=f"workspace_application_{job_id}", width="stretch"):
+    if action_col2.button("Edit application" if not applications_df.empty else "Add application", key=f"workspace_application_{job_id}", width="stretch"):
         if applications_df.empty:
             st.session_state["open_add_application"] = True
         else:
@@ -100,48 +104,43 @@ def render_job_header(job, job_id, applications_df, fit):
         navigate_to("Applications")
     source_url = clean_value(job.get("source_url"))
     if source_url:
-        action_col3.link_button("Open original posting", source_url)
+        action_col3.link_button("Open original posting", source_url, width="stretch")
 
-    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
     with metric_col1:
         render_fit_metric(fit)
     metric_col2.metric("Application", applications_label)
     metric_col3.metric("Follow-up", follow_up)
-    metric_col4.metric("Skills identified", len(fit["requested"]))
 
 
 def render_overview_tab(job, skills_df):
-    left, right = st.columns([1.1, 1.9])
+    left, right = st.columns([1, 2], gap="large")
     with left:
-        st.subheader("Role snapshot")
+        st.subheader("At a glance")
         snapshot = {
-            "Location": clean_value(job.get("location")) or "Not specified",
-            "Work mode": clean_value(job.get("work_mode")) or "Not specified",
-            "Salary": clean_value(job.get("salary_range")) or "Not specified",
-            "Source": clean_value(job.get("application_source")) or "Not specified",
-            "Analyzed": (clean_value(job.get("analyzed_at")) or clean_value(job.get("created_at")))[:16] or "—",
+            "Location": clean_value(job.get("location")),
+            "Work mode": clean_value(job.get("work_mode")),
+            "Salary": clean_value(job.get("salary_range")),
+            "Source": clean_value(job.get("application_source")),
         }
         for label, value in snapshot.items():
-            st.markdown(f"**{label}**  \n{value}")
+            if value and value != "Not specified":
+                st.markdown(f"**{label}**  \n{value}")
+        analyzed = (clean_value(job.get("analyzed_at")) or clean_value(job.get("created_at")))[:10]
+        if analyzed:
+            st.caption(f"Analyzed {analyzed}")
 
     with right:
-        st.subheader("What this role emphasizes")
+        st.subheader("Skills in the posting")
         if skills_df.empty:
             st.info("No structured skills were extracted for this role.")
         else:
             skills = canonicalize_skill_rows(skills_df)
-            baskets = skills["skill_basket"].dropna().drop_duplicates().tolist()
-            if baskets:
-                st.markdown("  ".join(f"`{basket}`" for basket in baskets))
-            visible = [column for column in ["canonical_skill", "requirement_level"] if column in skills.columns]
-            if visible:
-                st.dataframe(
-                    skills[visible].drop_duplicates().rename(
-                        columns={"canonical_skill": "Skill", "requirement_level": "Requirement"}
-                    ),
-                    width="stretch",
-                    hide_index=True,
-                )
+            for basket, group in skills.groupby("skill_basket", sort=False):
+                names = group["canonical_skill"].dropna().drop_duplicates().tolist()
+                with st.container(border=True):
+                    st.markdown(f"**{basket}**")
+                    st.write(" · ".join(names))
 
     raw_description = clean_value(job.get("raw_description"))
     with st.expander("View original job description", expanded=False):
@@ -151,47 +150,73 @@ def render_overview_tab(job, skills_df):
             st.warning("The original job description was not retained for this older record.")
 
 
-def render_fit_tab(fit, profiles_df):
-    st.subheader("Resume fit and skill gaps")
-    if not profiles_df.empty:
-        st.caption(f"Compared against: {fit['profile_name'] or 'selected resume profile'}")
-    else:
-        st.info("Create a resume profile in Resume & Gaps to compare your evidence with this role.")
-        if st.button("Open Resume & Gaps", key="open_resume_from_fit"):
+def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, recommendation):
+    st.subheader("Best CV for this job")
+    if profiles_df.empty:
+        st.info("Upload a CV in Resumes to compare it with this role.")
+        if st.button("Open Resumes", key="open_resume_from_fit"):
             navigate_to("Resume & Gaps")
+        return
 
-    score = fit["score"]
-    if score is not None:
-        st.progress(score / 100, text=f"{score}% of the extracted skills are represented in the selected resume")
-
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
-    metric_col1.metric("Matched skills", len(fit["matched"]))
-    metric_col2.metric("Potential gaps", len(fit["missing"]))
-    metric_col3.metric("Requested skills", len(fit["requested"]))
-
-    matched_tab, gaps_tab = st.tabs(["Already demonstrated", "Potential gaps"])
-    with matched_tab:
-        if fit["matched"].empty:
-            st.info("No exact skill matches were found in the selected resume profile.")
+    rankings = fit["rankings"]
+    if recommendation:
+        chosen = profiles_df[profiles_df["id"] == recommendation["selected_profile_id"]].iloc[0]
+        st.success(f"AI recommends {clean_value(chosen['profile_name'])}")
+        if recommendation["reason"]:
+            st.write(recommendation["reason"])
+    else:
+        if fit["score"] is None:
+            st.info("No extracted skills to compare. AI can still review the job description and CV pool.")
         else:
-            st.dataframe(
-                fit["matched"][["canonical_skill", "skill_basket"]].drop_duplicates().rename(
-                    columns={"canonical_skill": "Skill", "skill_basket": "Category"}
-                ),
-                width="stretch",
-                hide_index=True,
-            )
-    with gaps_tab:
-        if fit["missing"].empty:
-            st.success("No extracted skill gaps were identified.")
-        else:
-            st.dataframe(
-                fit["missing"][["canonical_skill", "skill_basket", "requirement_level"]].drop_duplicates().rename(
-                    columns={"canonical_skill": "Skill", "skill_basket": "Category", "requirement_level": "Requirement"}
-                ),
-                width="stretch",
-                hide_index=True,
-            )
+            st.info(f"Top detected skill overlap: {fit['profile_name']}. Ask AI to review the CV pool for a role-based recommendation.")
+
+    if st.button(
+        "Refresh AI suggestions" if recommendation else "Analyze CV pool",
+        key=f"analyze_cv_pool_{job_id}", type="primary",
+        disabled=not bool(clean_value(job.get("raw_description"))),
+        help="Sends the job description and extracted text from every CV to OpenAI. Long CVs may be shortened for the comparison.",
+    ):
+        try:
+            with st.spinner("Comparing CVs and preparing suggestions…", show_time=True):
+                result = generate_resume_recommendation(job, profiles_df, rankings)
+                save_job_resume_recommendation(job_id, fingerprint, result)
+            st.rerun()
+        except (RuntimeError, ValueError) as error:
+            st.error(f"CV analysis could not be completed: {error}")
+
+    if recommendation:
+        strengths_col, changes_col = st.columns([1, 2], gap="large")
+        with strengths_col:
+            st.markdown("#### Why this CV")
+            for item in recommendation["strengths"]:
+                st.markdown(f"- {item}")
+            if recommendation["cautions"]:
+                st.markdown("#### Check before using")
+                for item in recommendation["cautions"]:
+                    st.markdown(f"- {item}")
+        with changes_col:
+            st.markdown("#### Suggested edits")
+            for index, item in enumerate(recommendation["suggestions"], 1):
+                with st.container(border=True):
+                    st.markdown(f"**{index}. {item['section'] or 'CV edit'}**")
+                    st.write(item["recommendation"])
+                    if item["evidence"]:
+                        st.caption(f"Based on: {item['evidence']}")
+        if st.button("Create tailored draft", key=f"create_tailored_from_pick_{job_id}"):
+            go_to_tailoring(job_id)
+
+    with st.expander("Compare all CVs", expanded=not bool(recommendation)):
+        for _, row in rankings.iterrows():
+            score = f"{int(row['score'])}% skill overlap" if pd.notna(row["score"]) else "No extracted skills to compare"
+            st.markdown(f"**{row['profile_name']}** · {row['target_domain'] or 'General'} · {score}")
+    with st.expander("Detected skill evidence"):
+        matched, gaps = st.columns(2, gap="large")
+        with matched:
+            st.markdown("**Found in selected CV**")
+            st.write(", ".join(fit["matched"]["canonical_skill"].dropna().unique()) or "None detected")
+        with gaps:
+            st.markdown("**Not found in selected CV**")
+            st.write(", ".join(fit["missing"]["canonical_skill"].dropna().unique()) or "None detected")
 
 
 def render_packet_tab(job_id, applications_df):
@@ -325,7 +350,12 @@ def render_job_detail():
                 ignore_index=True,
             )
     profiles_df = get_resume_profiles_df()
-    fit = build_fit_snapshot(skills_df, profiles_df, job.get("domain", ""))
+    fingerprint = recommendation_fingerprint(job, profiles_df)
+    recommendation = get_job_resume_recommendation(job_id, fingerprint) if not profiles_df.empty else None
+    fit = build_fit_snapshot(
+        skills_df, profiles_df, job.get("domain", ""),
+        profile_id=recommendation["selected_profile_id"] if recommendation else None,
+    )
 
     render_job_header(job, job_id, applications_df, fit)
     overview_tab, fit_tab, packet_tab, tracking_tab = st.tabs(
@@ -340,7 +370,7 @@ def render_job_detail():
         else:
             st.dataframe(build_certification_summary(certs_df), width="stretch", hide_index=True)
     with fit_tab:
-        render_fit_tab(fit, profiles_df)
+        render_fit_tab(job, job_id, fit, profiles_df, fingerprint, recommendation)
     with packet_tab:
         render_packet_tab(job_id, applications_df)
     with tracking_tab:

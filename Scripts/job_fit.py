@@ -8,7 +8,6 @@ import pandas as pd
 
 from Scripts.skill_analysis import canonicalize_skill_rows
 from Scripts.skill_taxonomy import normalize_skill_name
-from Scripts.resume_profiles import choose_profile
 
 
 def clean_value(value) -> str:
@@ -37,18 +36,48 @@ def parse_resume_skills(profile_row) -> set[str]:
     return known
 
 
-def selected_profile(profiles_df, job_domain=""):
-    return choose_profile(profiles_df, job_domain)
+def rank_resume_profiles(skills_df, profiles_df, job_domain=""):
+    """Rank every saved CV by distinct skill overlap; category breaks ties."""
+    columns = ["profile_id", "profile_name", "target_domain", "score", "matched", "requested"]
+    if profiles_df is None or profiles_df.empty:
+        return pd.DataFrame(columns=columns)
+    canonical = canonicalize_skill_rows(skills_df) if skills_df is not None and not skills_df.empty else pd.DataFrame()
+    requested = {
+        normalize_skill_name(value, value).lower()
+        for value in canonical.get("canonical_skill", pd.Series(dtype=str)).dropna().unique()
+    }
+    rows = []
+    for _, profile in profiles_df.iterrows():
+        matched = len(requested & parse_resume_skills(profile))
+        category = clean_value(profile.get("target_domain"))
+        rows.append({
+            "profile_id": int(profile["id"]),
+            "profile_name": clean_value(profile.get("profile_name")),
+            "target_domain": category,
+            "score": round(matched / len(requested) * 100) if requested else None,
+            "matched": matched,
+            "requested": len(requested),
+            "category_match": int(category.casefold() == clean_value(job_domain).casefold()),
+        })
+    ranked = pd.DataFrame(rows).sort_values(
+        ["matched", "category_match", "profile_name", "profile_id"],
+        ascending=[False, False, True, True], kind="stable",
+    )
+    return ranked[columns].reset_index(drop=True)
 
 
-def build_fit_snapshot(skills_df, profiles_df, job_domain=""):
+def build_fit_snapshot(skills_df, profiles_df, job_domain="", profile_id=None):
     empty = {
         "score": None,
         "requested": pd.DataFrame(),
         "matched": pd.DataFrame(),
         "missing": pd.DataFrame(),
         "profile_name": "",
+        "profile_id": None,
+        "rankings": pd.DataFrame(),
     }
+    rankings = rank_resume_profiles(skills_df, profiles_df, job_domain)
+    empty["rankings"] = rankings
     if skills_df is None or skills_df.empty:
         return empty
 
@@ -56,7 +85,9 @@ def build_fit_snapshot(skills_df, profiles_df, job_domain=""):
     if canonical.empty:
         return empty
 
-    profile_row = selected_profile(profiles_df, job_domain)
+    selected_id = int(profile_id) if profile_id is not None else (int(rankings.iloc[0]["profile_id"]) if not rankings.empty else None)
+    selected_rows = profiles_df[profiles_df["id"] == selected_id] if selected_id is not None else pd.DataFrame()
+    profile_row = selected_rows.iloc[0] if not selected_rows.empty else None
     known_skills = parse_resume_skills(profile_row)
     canonical["is_matched"] = canonical["canonical_skill"].apply(
         lambda value: normalize_skill_name(value, value).lower() in known_skills
@@ -72,6 +103,8 @@ def build_fit_snapshot(skills_df, profiles_df, job_domain=""):
         "matched": matched,
         "missing": missing,
         "profile_name": clean_value(profile_row.get("profile_name")) if profile_row is not None else "",
+        "profile_id": selected_id if profile_row is not None else None,
+        "rankings": rankings,
     }
 
 

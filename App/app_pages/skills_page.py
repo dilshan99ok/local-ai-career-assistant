@@ -197,10 +197,7 @@ def render_skill_gaps(skill_summary):
         st.info("Create a resume profile in Resume & Gaps to compare your skills with market demand.")
         return
 
-    options = {
-        f"{row['profile_name']}" + (" (active)" if row["is_active"] else ""): row
-        for _, row in profiles.iterrows()
-    }
+    options = {f"{row['profile_name']} · #{int(row['id'])}": row for _, row in profiles.iterrows()}
     selected = st.selectbox("Resume profile", list(options), key="skills_resume_selector")
     row = options[selected]
     try:

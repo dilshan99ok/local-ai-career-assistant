@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -13,8 +14,10 @@ from Scripts import ai_helper
 from Scripts.resume_helper import extract_resume_skills
 from Scripts.resume_import import extract_resume_details, extract_resume_text
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
-from Scripts.resume_profiles import choose_profile
 from Scripts.job_fit import build_job_fit_summary, build_fit_snapshot
+from Scripts.resume_recommendation import (
+    generate_resume_recommendation, recommendation_fingerprint,
+)
 from Scripts.job_url import JobPageFetchError, fetch_job_posting
 from Scripts.skill_analysis import build_certification_summary, build_skill_demand_summary
 from Scripts.tailoring import (
@@ -55,6 +58,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("follow_up_events", tables)
         self.assertIn("ai_extraction_cache", tables)
         self.assertIn("resume_profiles", tables)
+        self.assertIn("job_resume_recommendations", tables)
         self.assertIn("application_messages", tables)
 
     def test_follow_up_uses_selected_application_context(self):
@@ -134,9 +138,8 @@ class WorkflowTests(unittest.TestCase):
         )
         profiles = database.get_resume_profiles_df()
         self.assertEqual(len(profiles), 2)
-        self.assertEqual(int(choose_profile(profiles, "Networking")["id"]), network_id)
-        self.assertEqual(int(choose_profile(profiles, "IT Support")["id"]), support_id)
-        self.assertEqual(int(profiles[profiles["is_active"] == 1].iloc[0]["id"]), network_id)
+        self.assertEqual(set(profiles["id"].astype(int)), {network_id, support_id})
+        self.assertTrue((profiles["is_active"] == 0).all())
 
         version_id = database.save_resume_version(
             "Network Engineer draft", "# Network Engineer\n- BGP routing experience",
@@ -156,9 +159,51 @@ class WorkflowTests(unittest.TestCase):
             "skill_basket": "Cisco Routing & Switching",
         }])
         self.assertEqual(build_fit_snapshot(network_skill, profiles, "Networking")["score"], 100)
-        self.assertEqual(build_fit_snapshot(network_skill, profiles, "IT Support")["score"], 0)
+        self.assertEqual(build_fit_snapshot(network_skill, profiles, "IT Support")["profile_id"], network_id)
 
-    def test_remove_base_cv_keeps_job_draft_and_promotes_another_default(self):
+    def test_ai_cv_choice_uses_pool_and_saved_result_expires_when_cvs_change(self):
+        job = {"id": 9, "company": "Example", "job_title": "Network Engineer",
+               "domain": "Networking", "raw_description": "Support BGP routing and Linux."}
+        profiles = pd.DataFrame([
+            {"id": 1, "profile_name": "Support CV", "target_domain": "IT Support",
+             "skills_json": '[{"skill":"Desktop Support"}]', "resume_text": "Desktop support",
+             "is_active": 1},
+            {"id": 2, "profile_name": "Network CV", "target_domain": "Networking",
+             "skills_json": '[{"skill":"BGP"}]', "resume_text": "Supported BGP routing",
+             "is_active": 0},
+        ])
+        skills = pd.DataFrame([{"specific_skill": "BGP", "raw_skill": "BGP",
+                                "skill_basket": "Cisco Routing & Switching"}])
+        rankings = build_fit_snapshot(skills, profiles, "Networking")["rankings"]
+        self.assertEqual(int(rankings.iloc[0]["profile_id"]), 2)
+        answer = json.dumps({
+            "selected_profile_id": 2, "reason": "Direct routing evidence",
+            "strengths": ["BGP"],
+            "suggestions": [{"section": "Summary", "recommendation": "Lead with routing work",
+                             "evidence": "Supported BGP routing"}],
+            "cautions": ["Do not claim Linux experience without evidence"],
+        })
+        with patch("Scripts.resume_recommendation.OpenAIProvider") as provider:
+            provider.return_value.generate_text.return_value = answer
+            result = generate_resume_recommendation(job, profiles, rankings)
+            prompt = provider.return_value.generate_text.call_args.args[0]
+        self.assertIn("Support CV", prompt)
+        self.assertIn("Network CV", prompt)
+        self.assertEqual(result["selected_profile_id"], 2)
+        fingerprint = recommendation_fingerprint(job, profiles)
+        database.save_job_resume_recommendation(9, fingerprint, result)
+        self.assertEqual(database.get_job_resume_recommendation(9, fingerprint), result)
+        profiles.loc[1, "resume_text"] = "Changed routing evidence"
+        self.assertIsNone(database.get_job_resume_recommendation(
+            9, recommendation_fingerprint(job, profiles)
+        ))
+
+    def test_ai_cv_choice_rejects_unknown_profile(self):
+        from Scripts.resume_recommendation import parse_recommendation
+        with self.assertRaises(ValueError):
+            parse_recommendation('{"selected_profile_id": 99, "suggestions": [{"recommendation": "Edit"}]}', {1, 2})
+
+    def test_remove_base_cv_keeps_job_draft(self):
         first_id = database.save_resume_profile(
             "Networking CV", "BGP routing", [], target_domain="Networking"
         )
@@ -177,12 +222,16 @@ class WorkflowTests(unittest.TestCase):
             "Network draft", "# Network Engineer\nBGP routing", profile_id=first_id,
             source_type="tailored", target_job_id=42, application_id=application_id,
         )
+        database.save_job_resume_recommendation(
+            42, "before-removal", {"selected_profile_id": first_id, "suggestions": []}
+        )
 
         self.assertTrue(database.delete_resume_profile(first_id))
         self.assertFalse(database.delete_resume_profile(first_id))
+        self.assertIsNone(database.get_job_resume_recommendation(42, "before-removal"))
         profiles = database.get_resume_profiles_df()
         self.assertEqual(profiles["id"].tolist(), [second_id])
-        self.assertEqual(int(profiles.iloc[0]["is_active"]), 1)
+        self.assertEqual(int(profiles.iloc[0]["is_active"]), 0)
         versions = database.get_resume_versions_df()
         self.assertEqual(int(versions.iloc[0]["id"]), version_id)
         self.assertTrue(pd.isna(versions.iloc[0]["profile_id"]))
@@ -316,7 +365,7 @@ class WorkflowTests(unittest.TestCase):
             ]
         )
         profiles = pd.DataFrame(
-            [{"profile_name": "Network resume", "is_active": 1, "skills_json": '[{"skill": "Cisco Routing"}]'}]
+            [{"id": 1, "profile_name": "Network resume", "is_active": 0, "skills_json": '[{"skill": "Cisco Routing"}]'}]
         )
         summary = build_job_fit_summary(jobs, skill_rows, profiles)
         self.assertEqual(int(summary.iloc[0]["fit_score"]), 50)

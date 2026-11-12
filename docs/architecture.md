@@ -15,14 +15,14 @@
 | Dashboard and navigation | `App/dashboard.py`, `App/app_utils/navigation.py` | Sidebar pages, contextual job workspaces, back navigation |
 | Applications | `App/app_pages/applications_page.py`, `App/app_pages/opportunities_page.py` | URL or pasted-description intake, application list, pipeline, tracking, and application profile |
 | Job details and skills | `App/app_pages/job_detail_page.py`, `App/app_pages/skills_page.py` | Per-job details and demand analysis |
-| Resumes and tailoring | `App/app_pages/resume_page.py`, `App/app_pages/tailoring_page.py` | Source CVs, local fit and gaps, resume and cover-letter drafts |
+| Resumes and tailoring | `App/app_pages/resume_page.py`, `App/app_pages/tailoring_page.py`, `Scripts/job_fit.py`, `Scripts/resume_recommendation.py` | Source CV pool, skill overlap, AI CV recommendation, resume and cover-letter drafts |
 | AI and authentication | `Scripts/ai_provider.py`, `Scripts/ai_helper.py`, `Scripts/chatgpt_auth.py` | ChatGPT sign-in, extraction, and generation |
 | Storage | `App/app_utils/database.py` | SQLite schema, migrations, queries, and updates |
 | Local analysis | `Scripts/job_fit.py`, `Scripts/skill_analysis.py`, `Scripts/skill_taxonomy.py` | Repeatable fit and skill summaries |
 
 ## Data and files
 
-The SQLite database is under `Data/database/` and is excluded from Git. It contains saved jobs, applications, skill and certification data, resume profiles, document drafts, and tracking history. Uploaded CVs retain extracted text and, for new uploads, the original file so the app can preview its layout. DOCX preview uses Microsoft Word on Windows to render a temporary PDF. Files uploaded before original-file storage was added can be attached from the CV preview.
+The SQLite database is under `Data/database/` and is excluded from Git. It contains saved jobs, applications, skill and certification data, resume profiles, job-specific CV recommendations, document drafts, and tracking history. Uploaded CVs retain extracted text and, for new uploads, the original file so the app can preview its layout. DOCX preview uses Microsoft Word on Windows to render a temporary PDF. Files uploaded before original-file storage was added can be attached from the CV preview.
 
 ChatGPT OAuth credentials are stored outside the repository. `.env` files, the database, raw job descriptions, and processed exports are ignored by Git. The repository contains code and configuration examples only.
 

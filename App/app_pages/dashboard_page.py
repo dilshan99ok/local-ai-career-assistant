@@ -81,7 +81,7 @@ def render_header(jobs_df, applications_df, fit_summary):
     cols[1].metric(
         "80%+ job matches",
         strong_matches,
-        help="Jobs where at least 80% of extracted skills appear in the matching category CV, or the default CV when no category matches.",
+        help="Jobs where at least 80% of extracted skills appear in the strongest matching uploaded CV.",
     )
     cols[2].metric("Interviews", interviews)
     cols[3].metric("Offers", offers)

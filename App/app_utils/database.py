@@ -201,6 +201,17 @@ def initialize_database():
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_resume_recommendations (
+            job_id INTEGER PRIMARY KEY,
+            profile_id INTEGER NOT NULL,
+            context_hash TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     resume_profile_columns = {
         "source_filename": "TEXT",
         "source_type": "TEXT",
@@ -572,9 +583,41 @@ def get_resume_profiles_df():
         SELECT id, profile_name, resume_text, skills_json, is_active,
                source_filename, source_type, target_domain, details_json, created_at, updated_at
         FROM resume_profiles
-        ORDER BY is_active DESC, target_domain, profile_name
+        ORDER BY target_domain, profile_name, id
         """
     )
+
+
+def get_job_resume_recommendation(job_id, context_hash):
+    connection = get_connection()
+    try:
+        row = connection.execute(
+            "SELECT result_json FROM job_resume_recommendations WHERE job_id = ? AND context_hash = ?",
+            (int(job_id), context_hash),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+    finally:
+        connection.close()
+
+
+def save_job_resume_recommendation(job_id, context_hash, result):
+    connection = get_connection()
+    try:
+        with connection:
+            connection.execute(
+                """INSERT INTO job_resume_recommendations
+                   (job_id, profile_id, context_hash, result_json, created_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(job_id) DO UPDATE SET
+                     profile_id = excluded.profile_id,
+                     context_hash = excluded.context_hash,
+                     result_json = excluded.result_json,
+                     created_at = excluded.created_at""",
+                (int(job_id), int(result["selected_profile_id"]), context_hash,
+                 json.dumps(result), _timestamp()),
+            )
+    finally:
+        connection.close()
 
 
 def get_resume_source_file(profile_id):
@@ -611,21 +654,13 @@ def save_resume_profile(
     source_file=None,
     details=None,
     target_domain="General",
-    make_active=False,
 ):
     connection = get_connection()
     now = _timestamp()
-    activate = bool(make_active) or connection.execute(
-        "SELECT 1 FROM resume_profiles WHERE is_active = 1 LIMIT 1"
-    ).fetchone() is None
-    if activate:
-        connection.execute("UPDATE resume_profiles SET is_active = 0 WHERE is_active = 1")
 
     if profile_id:
         updates = ["profile_name = ?", "resume_text = ?", "skills_json = ?", "target_domain = ?", "updated_at = ?"]
         values = [profile_name, resume_text, json.dumps(skills), target_domain, now]
-        if activate:
-            updates.append("is_active = 1")
         if source_filename is not None:
             updates.append("source_filename = ?")
             values.append(source_filename)
@@ -654,7 +689,7 @@ def save_resume_profile(
                 profile_name,
                 resume_text,
                 json.dumps(skills),
-                int(activate),
+                0,
                 source_filename or "",
                 source_type or "Pasted text",
                 source_file,
@@ -666,29 +701,17 @@ def save_resume_profile(
         )
         profile_id = cursor.lastrowid
 
+    connection.execute("DELETE FROM job_resume_recommendations")
     connection.commit()
     connection.close()
     return profile_id
-
-
-def set_active_resume_profile(profile_id):
-    connection = get_connection()
-    connection.execute("UPDATE resume_profiles SET is_active = 0")
-    connection.execute(
-        "UPDATE resume_profiles SET is_active = 1, updated_at = ? WHERE id = ?",
-        (_timestamp(), profile_id),
-    )
-    connection.commit()
-    connection.close()
 
 
 def delete_resume_profile(profile_id):
     """Remove a base CV while keeping its job-specific drafts and application links."""
     connection = get_connection()
     try:
-        row = connection.execute(
-            "SELECT is_active FROM resume_profiles WHERE id = ?", (profile_id,)
-        ).fetchone()
+        row = connection.execute("SELECT id FROM resume_profiles WHERE id = ?", (profile_id,)).fetchone()
         if row is None:
             return False
         with connection:
@@ -697,15 +720,7 @@ def delete_resume_profile(profile_id):
                 (profile_id,),
             )
             connection.execute("DELETE FROM resume_profiles WHERE id = ?", (profile_id,))
-            if row[0]:
-                replacement = connection.execute(
-                    "SELECT id FROM resume_profiles ORDER BY updated_at DESC, id DESC LIMIT 1"
-                ).fetchone()
-                if replacement:
-                    connection.execute(
-                        "UPDATE resume_profiles SET is_active = 1 WHERE id = ?",
-                        (replacement[0],),
-                    )
+            connection.execute("DELETE FROM job_resume_recommendations")
         return True
     finally:
         connection.close()

@@ -14,7 +14,6 @@ from App.app_utils.database import (
     get_resume_source_file,
     get_specific_skills_df,
     save_resume_profile,
-    set_active_resume_profile,
 )
 from Scripts.resume_helper import extract_resume_skills
 from Scripts.resume_profiles import PROFILE_CATEGORIES, category_from_filename
@@ -246,8 +245,10 @@ def render_profile_tab(profiles_df):
         return None
 
     st.subheader("Your CVs")
-    active = profiles_df[profiles_df["is_active"] == 1]
-    selected_id = int(active.iloc[0]["id"] if not active.empty else profiles_df.iloc[0]["id"])
+    selected_id = st.session_state.get("resume_inspect_id")
+    if selected_id not in set(profiles_df["id"].astype(int)):
+        selected_id = int(profiles_df.iloc[0]["id"])
+        st.session_state["resume_inspect_id"] = selected_id
 
     for _, row in profiles_df.iterrows():
         profile_id = int(row["id"])
@@ -259,14 +260,14 @@ def render_profile_tab(profiles_df):
                 category = escape(clean_value(row.get("target_domain")) or "General")
                 filename = escape(clean_value(row.get("source_filename")) or "Pasted text")
                 category_badge = f'<span class="resume-card-category">{category}</span>'
-                badge = '<span class="resume-card-selected">Default</span>' if is_selected else ""
+                badge = '<span class="resume-card-selected">Inspecting</span>' if is_selected else ""
                 st.markdown(
                     f'<div class="resume-card-name">{label}{category_badge}{badge}</div>'
                     f'<div class="resume-card-meta">{filename}</div>',
                     unsafe_allow_html=True,
                 )
             with actions_col:
-                view_col, default_col, remove_col = st.columns([0.9, 1.4, 1], gap="small")
+                view_col, inspect_col, remove_col = st.columns([1, 1.2, 1], gap="small")
                 if view_col.button(
                     "View", key=f"view_resume_profile_{profile_id}",
                     type="tertiary", icon=":material/visibility:",
@@ -276,11 +277,11 @@ def render_profile_tab(profiles_df):
                         clean_value(row["profile_name"]),
                         clean_value(row.get("resume_text")),
                     )
-                if not is_selected and default_col.button(
-                    "Set default", key=f"activate_resume_profile_{profile_id}",
-                    type="tertiary", icon=":material/star_outline:",
+                if not is_selected and inspect_col.button(
+                    "Inspect", key=f"inspect_resume_profile_{profile_id}",
+                    type="tertiary", icon=":material/analytics:",
                 ):
-                    set_active_resume_profile(profile_id)
+                    st.session_state["resume_inspect_id"] = profile_id
                     st.rerun()
                 if remove_col.button(
                     "Remove", key=f"remove_resume_profile_{profile_id}",

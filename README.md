@@ -27,7 +27,8 @@ An AI-powered career assistant designed to analyze job descriptions, extract ski
 - Open each saved application in one profile to update its details, documents, and outcomes; the list and job workspace lead to the same editor.
 - Inspect saved job descriptions with related skills and certifications.
 - Compare resume profiles with the skills requested across saved jobs.
-- Upload and remove category CVs for IT Support, Networking, Systems Administration, and other roles. Each job uses a matching CV for fit checks when available; removing a base CV keeps its saved job drafts.
+- Upload and remove category CVs for IT Support, Networking, Systems Administration, and other roles. Each job compares the full CV pool; removing a base CV keeps its saved job drafts.
+- From a job's Fit & gaps tab, choose **Analyze CV pool** to let AI recommend a source CV and suggest evidence-based edits. The result is saved for that job; analyze again after changing the job description or CV pool. No default CV is needed.
 - CV uploads retain the original PDF or DOCX for a formatted preview. DOCX previews use Microsoft Word on Windows. CVs uploaded before this feature need their original file attached once from the View dialog.
 - Choose a starting CV in Tailoring Studio, review a job-specific draft, save it separately, and download an editable DOCX from Tailoring Studio or the job workspace.
 - Export the filtered opportunities list as CSV.
@@ -45,5 +46,7 @@ The application uses Sign in with ChatGPT for eligible structured job-descriptio
 4. Run the app with `python -m streamlit run App/dashboard.py`.
 
 The sign-in flow uses a browser-based OAuth callback and stores its refresh token outside the project. It does not require an OpenAI API key or API credits; availability depends on the ChatGPT account's plan-sharing eligibility.
+
+The CV pool analysis sends the job description and extracted text from every uploaded CV to OpenAI only when **Analyze CV pool** is selected. Long CVs may be shortened for the comparison. Generated suggestions should be reviewed before use.
 
 The supported app entry point is `App/dashboard.py`; see [architecture](docs/architecture.md) for the current modules and data flow.
