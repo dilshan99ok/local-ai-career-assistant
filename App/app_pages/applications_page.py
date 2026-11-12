@@ -14,7 +14,6 @@ from Scripts.ai_helper import (
 from App.app_utils.database import (
     get_applications_df,
     update_application,
-    update_application_status,
     delete_application,
     get_application_status_history_df,
     get_follow_up_events_df,
@@ -26,6 +25,9 @@ from App.app_utils.database import (
 from Scripts.job_fit import attach_fit_scores
 from Scripts.job_url import JobPageFetchError, fetch_job_posting
 from App.app_utils.navigation import navigate_to
+from App.app_pages.opportunities_page import (
+    build_opportunities_df, filter_opportunities, render_opportunities_table,
+)
 
 DOMAINS = [
     "IT Support",
@@ -509,7 +511,10 @@ def render_application_profile(row):
         st.session_state["editing_application_id"] = None
         st.session_state["scroll_to_top"] = st.session_state.get("scroll_to_top", 0) + 1
         st.rerun()
-    if clean_value(row.get("source_file")) and job_col.button("View job workspace", key=f"profile_job_{row_id}"):
+    source_file = clean_value(row.get("source_file"))
+    jobs_df = get_jobs_df() if source_file else pd.DataFrame()
+    has_job = not jobs_df.empty and bool((jobs_df["source_file"] == source_file).any())
+    if has_job and job_col.button("View job details", key=f"profile_job_{row_id}"):
         open_application_workspace(row)
     st.title(clean_value(row["job_title"]) or "Application")
     st.caption(f"{clean_value(row['company']) or 'Unknown company'} · Application #{row_id}")
@@ -659,9 +664,15 @@ def render_application_profile(row):
             else:
                 st.dataframe(follow_up_history, width="stretch", hide_index=True)
 
+    if st.session_state.get("pending_delete_id") == row_id:
+        render_delete_confirmation(row)
+    elif st.button("Delete application", key=f"profile_delete_{row_id}", type="tertiary", icon=":material/delete_outline:"):
+        st.session_state["pending_delete_id"] = row_id
+        st.rerun()
+
 
 def render_delete_confirmation(row):
-    row_id = row["id"]
+    row_id = int(row["id"])
 
     label = (
         f"{clean_value(row['company']) or 'No company'} - "
@@ -681,6 +692,8 @@ def render_delete_confirmation(row):
             return
 
         st.session_state["pending_delete_id"] = None
+        st.session_state["editing_application_id"] = None
+        st.session_state["selected_application_id"] = None
         st.session_state["application_deleted"] = True
         st.rerun()
 
@@ -689,88 +702,19 @@ def render_delete_confirmation(row):
         st.rerun()
 
 
-def render_status_control(row_id, current_status):
-    display_status = STATUS_DISPLAY.get(current_status, current_status)
-
-    with st.popover(display_status, width="stretch"):
-        selected_status = st.radio(
-            "Update status",
-            STATUSES,
-            index=STATUSES.index(current_status),
-            key=f"status_{row_id}",
-            label_visibility="collapsed",
-            format_func=lambda status: STATUS_DISPLAY.get(status, status)
-        )
-
-        if selected_status != current_status:
-            try:
-                with st.spinner("Updating status…"):
-                    update_application_status(
-                        application_id=row_id,
-                        current_status=selected_status,
-                    )
-            except Exception as error:
-                st.error(f"Could not update status: {error}")
-                return
-            st.rerun()
-
-def render_application_filters(applications_df):
-    filter_col1, filter_col2, filter_col3 = st.columns([2, 1, 1])
-
-    with filter_col1:
-        search_text = st.text_input(
-            "Search applications",
-            key="applications_search_filter",
-            placeholder="Search company, job title, domain, or notes",
-        )
-
-    with filter_col2:
-        domains = ["All"]
-
-        if not applications_df.empty:
-            domains += sorted(
-                [
-                    domain
-                    for domain in applications_df["domain"].dropna().unique().tolist()
-                    if clean_value(domain)
-                ]
-            )
-
-        selected_domain = st.selectbox(
-            "Domain",
-            domains,
-            key="applications_domain_filter",
-        )
-
-    with filter_col3:
-        statuses = ["All"]
-
-        if not applications_df.empty:
-            statuses += sorted(
-                [
-                    status
-                    for status in applications_df["current_status"].dropna().unique().tolist()
-                    if clean_value(status)
-                ]
-            )
-
-        selected_status = st.selectbox(
-            "Status",
-            statuses,
-            key="applications_status_filter",
-        )
-
-    return search_text, selected_domain, selected_status
-
 
 def open_application_workspace(row):
     jobs_df = get_jobs_df()
     source_file = clean_value(row.get("source_file"))
-    matches = jobs_df[jobs_df["source_file"] == source_file] if not jobs_df.empty else pd.DataFrame()
+    matches = jobs_df[jobs_df["source_file"] == source_file] if source_file and not jobs_df.empty else pd.DataFrame()
     if matches.empty:
-        st.info("The source job record for this application is unavailable.")
+        st.session_state["editing_application_id"] = int(row["id"])
+        st.session_state["scroll_to_top"] = st.session_state.get("scroll_to_top", 0) + 1
+        st.rerun()
         return
-    navigate_to("Jobs", job_id=int(matches.iloc[0]["id"]))
+    st.session_state["selected_application_id"] = int(row["id"])
+    st.session_state.pop("editing_application_id", None)
+    navigate_to("Applications", job_id=int(matches.iloc[0]["id"]))
 
 
 def render_application_pipeline(applications_df):
@@ -800,238 +744,6 @@ def render_application_pipeline(applications_df):
                 st.caption(f"Showing 20 of {len(rows)}")
 
 
-def apply_application_filters(applications_df, search_text, selected_domain, selected_status):
-    filtered_df = applications_df.copy()
-
-    if selected_domain != "All":
-        filtered_df = filtered_df[filtered_df["domain"] == selected_domain]
-
-    if selected_status != "All":
-        filtered_df = filtered_df[filtered_df["current_status"] == selected_status]
-
-    search_text = clean_value(search_text).lower()
-
-    if search_text:
-        searchable_text = (
-            filtered_df["company"].fillna("").astype(str)
-            + " "
-            + filtered_df["job_title"].fillna("").astype(str)
-            + " "
-            + filtered_df["domain"].fillna("").astype(str)
-            + " "
-            + filtered_df["notes"].fillna("").astype(str)
-        ).str.lower()
-
-        filtered_df = filtered_df[
-            searchable_text.str.contains(search_text, regex=False)
-        ]
-
-    return filtered_df
-
-def render_saved_applications(applications_df):
-    heading_col, export_col = st.columns([5, 1], vertical_alignment="bottom")
-    heading_col.subheader("Saved Applications")
-    if not applications_df.empty:
-        export_col.download_button(
-            "Export CSV",
-            data=applications_df.to_csv(index=False).encode("utf-8"),
-            file_name="ai_career_applications.csv",
-            mime="text/csv",
-            key="download_applications_csv",
-            type="tertiary",
-            icon=":material/download:",
-        )
-
-    if applications_df.empty:
-        st.info("No applications saved yet. Add your first application to start building your career workspace.")
-        return
-
-    search_text, selected_domain, selected_status = render_application_filters(applications_df)
-
-    filtered_applications_df = apply_application_filters(
-        applications_df,
-        search_text,
-        selected_domain,
-        selected_status,
-    )
-
-    view_mode = st.radio(
-        "View",
-        ["Table", "Pipeline"],
-        horizontal=True,
-        key="applications_view_mode",
-    )
-    if view_mode == "Pipeline":
-        render_application_pipeline(filtered_applications_df)
-        return
-
-    filter_signature = f"{search_text}|{selected_domain}|{selected_status}"
-
-    if st.session_state.get("applications_filter_signature") != filter_signature:
-        st.session_state["applications_current_page"] = 1
-        st.session_state["applications_filter_signature"] = filter_signature
-
-    st.caption(
-        f"Showing {len(filtered_applications_df)} of {len(applications_df)} applications."
-    )
-
-    if filtered_applications_df.empty:
-        st.info("No applications match the current filters.")
-        return
-
-    rows_per_page = 10
-
-    total_rows = len(filtered_applications_df)
-    total_pages = max((total_rows - 1) // rows_per_page + 1, 1)
-
-    if "applications_current_page" not in st.session_state:
-        st.session_state["applications_current_page"] = 1
-
-    current_page = st.session_state["applications_current_page"]
-
-    if current_page > total_pages:
-        current_page = total_pages
-        st.session_state["applications_current_page"] = current_page
-
-    start_index = (current_page - 1) * rows_per_page
-    end_index = start_index + rows_per_page
-
-    paginated_df = filtered_applications_df.iloc[start_index:end_index]
-
-    header_cols = st.columns([1.2, 2.35, 1.1, 1.1, 1.0, 1.1, 1.2, 1.6, 0.45, 0.45])
-
-    header_cols[0].markdown("**Company**")
-    header_cols[1].markdown("**Job Title**")
-    header_cols[2].markdown("**Domain**")
-    header_cols[3].markdown("**Fit**")
-    header_cols[4].markdown("**Applied**")
-    header_cols[5].markdown("**Follow-up**")
-    header_cols[6].markdown("**Status**")
-    header_cols[7].markdown("**Notes**")
-    header_cols[8].markdown("**Edit**")
-    header_cols[9].markdown("**Del**")
-
-    st.divider()
-
-    for _, row in paginated_df.iterrows():
-        row_id = row["id"]
-
-        row_cols = st.columns([1.2, 2.35, 1.1, 1.1, 1.0, 1.1, 1.2, 1.6, 0.45, 0.45])
-
-        row_cols[0].write(clean_value(row["company"]) or "—")
-        if row_cols[1].button(
-            clean_value(row["job_title"]) or "—",
-            key=f"application_open_job_{row_id}",
-            type="tertiary",
-            width="stretch",
-        ):
-            open_application_workspace(row)
-        row_cols[2].write(clean_value(row["domain"]) or "—")
-        row_cols[3].write(clean_value(row.get("fit_display")) or "—")
-        row_cols[4].write(clean_value(row["date_applied"]) or "—")
-        row_cols[5].write(clean_value(row["follow_up_date"]) or "—")
-
-        current_status = get_valid_status(row["current_status"])
-
-        with row_cols[6]:
-            render_status_control(row_id, current_status)
-
-        row_cols[7].write(clean_value(row["notes"]) or "—")
-
-        edit_clicked = row_cols[8].button(
-            "✏️",
-            key=f"edit_button_{row_id}",
-            help="Edit this application",
-        )
-
-        delete_clicked = row_cols[9].button(
-            "🗑️",
-            key=f"delete_button_{row_id}",
-            help="Delete this application",
-        )
-
-        if edit_clicked:
-            st.session_state["editing_application_id"] = row_id
-            st.session_state["pending_delete_id"] = None
-            st.session_state["scroll_to_top"] = st.session_state.get("scroll_to_top", 0) + 1
-            st.rerun()
-
-        if delete_clicked:
-            st.session_state["pending_delete_id"] = row_id
-            st.session_state["editing_application_id"] = None
-            st.rerun()
-
-        if st.session_state.get("pending_delete_id") == row_id:
-            render_delete_confirmation(row)
-
-        st.markdown(
-            """
-            <hr style="
-                margin-top: 0.25rem;
-                margin-bottom: 0.25rem;
-                border: none;
-                border-top: 1px solid rgba(255,255,255,0.08);
-            ">
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(
-        """
-        <div style="
-            margin-top: 1rem;
-            margin-bottom: 0.5rem;
-            border-top: 1px solid rgba(255,255,255,0.08);
-        "></div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    page_info_col, prev_col, page_col, next_col = st.columns([5, 1, 1.3, 1])
-
-    with page_info_col:
-        st.caption(
-            f"Showing applications {start_index + 1}–{min(end_index, total_rows)} of {total_rows}"
-        )
-
-    with prev_col:
-        previous_clicked = st.button(
-            "Previous",
-            disabled=current_page <= 1,
-            key="applications_previous_page",
-            width="stretch",
-        )
-
-    with page_col:
-        st.markdown(
-            f"""
-            <div style="
-                text-align: center;
-                padding-top: 0.45rem;
-                font-weight: 600;
-                color: rgba(255,255,255,0.85);
-            ">
-                Page {current_page} of {total_pages}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with next_col:
-        next_clicked = st.button(
-            "Next",
-            disabled=current_page >= total_pages,
-            key="applications_next_page",
-            width="stretch",
-        )
-
-    if previous_clicked:
-        st.session_state["applications_current_page"] = max(current_page - 1, 1)
-        st.rerun()
-
-    if next_clicked:
-        st.session_state["applications_current_page"] = min(current_page + 1, total_pages)
-        st.rerun()
 
 def render_applications():
     render_success_messages()
@@ -1053,21 +765,12 @@ def render_applications():
         get_skill_demand_rows_df(),
         get_resume_profiles_df(),
     )
-    if not applications_df.empty and not jobs_df.empty:
-        fit_columns = jobs_df[["source_file", "fit_score", "fit_status", "fit_display"]]
-        applications_df = applications_df.merge(fit_columns, on="source_file", how="left")
-
-    active = applications_df[
-        ~applications_df["current_status"].isin(["Rejected", "Withdrawn", "Archived"])
-    ] if not applications_df.empty else applications_df
-    followups = applications_df[
-        applications_df["follow_up_date"].fillna("").astype(str).str.strip() != ""
-    ] if not applications_df.empty else applications_df
+    opportunities_df = build_opportunities_df(jobs_df, applications_df)
     metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-    metric_col1.metric("Total applications", len(applications_df))
-    metric_col2.metric("Active pipeline", len(active))
-    metric_col3.metric("Interviews", int((applications_df["current_status"] == "Interview").sum()) if not applications_df.empty else 0)
-    metric_col4.metric("Scheduled follow-ups", len(followups))
+    metric_col1.metric("Opportunities", len(opportunities_df))
+    metric_col2.metric("Applications", len(applications_df))
+    metric_col3.metric("Not applied", int((opportunities_df["kind"] == "job").sum()))
+    metric_col4.metric("80%+ matches", int((pd.to_numeric(jobs_df.get("fit_score", pd.Series(dtype=float)), errors="coerce") >= 80).sum()))
 
     action_col, _ = st.columns([1.5, 4])
     is_adding = bool(st.session_state.get("show_add_application_form"))
@@ -1081,4 +784,45 @@ def render_applications():
         st.rerun()
 
     render_add_application_form()
-    render_saved_applications(applications_df)
+    render_opportunity_list(opportunities_df, applications_df)
+
+
+def render_opportunity_list(opportunities_df, applications_df):
+    heading_col, export_col = st.columns([5, 1], vertical_alignment="bottom")
+    heading_col.subheader("Opportunities")
+
+    view = st.segmented_control(
+        "Show", ["All", "Applications", "Not applied"],
+        default="All", key="opportunities_view",
+    )
+    search_col, domain_col, status_col = st.columns([2, 1, 1])
+    search = search_col.text_input("Search", key="opportunities_search", placeholder="Company, title, domain, or notes")
+    domains = ["All", *sorted(value for value in opportunities_df["domain"].unique() if clean_value(value))]
+    domain = domain_col.selectbox("Domain", domains, key="opportunities_domain")
+    statuses = ["All", *sorted(value for value in opportunities_df["current_status"].unique() if clean_value(value))]
+    status = status_col.selectbox("Status", statuses, key="opportunities_status")
+    filtered = filter_opportunities(opportunities_df, view, search, domain, status)
+
+    signature = f"{view}|{search}|{domain}|{status}"
+    if st.session_state.get("opportunities_filter_signature") != signature:
+        st.session_state["opportunities_current_page"] = 1
+        st.session_state["opportunities_table_reset"] = st.session_state.get("opportunities_table_reset", 0) + 1
+        st.session_state["opportunities_filter_signature"] = signature
+
+    if not filtered.empty:
+        export_col.download_button(
+            "Export CSV",
+            data=filtered[["company", "job_title", "domain", "fit_display", "current_status", "date_applied", "follow_up_date"]].to_csv(index=False).encode("utf-8"),
+            file_name="career_opportunities.csv", mime="text/csv",
+            key="download_opportunities_csv", type="tertiary", icon=":material/download:",
+        )
+
+    if view != "Not applied" and not applications_df.empty:
+        layout = st.segmented_control("Layout", ["List", "Pipeline"], default="List", key="opportunities_layout")
+        if layout == "Pipeline":
+            application_ids = set(filtered["application_id"].dropna().astype(int))
+            render_application_pipeline(applications_df[applications_df["id"].isin(application_ids)])
+            return
+
+    st.caption(f"Showing {len(filtered)} of {len(opportunities_df)} opportunities · Select a row for details; select a heading to sort.")
+    render_opportunities_table(filtered)

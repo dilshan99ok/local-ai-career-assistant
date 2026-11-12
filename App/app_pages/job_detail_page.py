@@ -36,8 +36,8 @@ def clean_value(value):
     return "" if value.lower() in {"none", "nan"} else value
 
 
-def go_to_jobs():
-    go_back(fallback="Jobs")
+def go_to_opportunities():
+    go_back(fallback="Applications")
 
 
 def go_to_tailoring(job_id):
@@ -54,8 +54,8 @@ def render_fit_metric(fit):
 
 def render_job_header(job, job_id, applications_df, fit):
     if not st.session_state.get("navigation_history"):
-        if st.button("← Back to Jobs", key="back_to_jobs"):
-            go_to_jobs()
+        if st.button("← Applications", key="back_to_jobs"):
+            go_to_opportunities()
 
     title = clean_value(job.get("job_title")) or "Untitled role"
     company = clean_value(job.get("company")) or "Unknown company"
@@ -300,22 +300,30 @@ def render_tracking_tab(applications_df):
 def render_job_detail():
     job_id = st.session_state.get("selected_job_id")
     if not job_id:
-        st.info("Open a job from the Jobs list to view its workspace.")
-        if st.button("Go to Jobs"):
-            go_to_jobs()
+        st.info("Select an opportunity to view its details.")
+        if st.button("Go to Applications"):
+            go_to_opportunities()
         return
 
     job_df = get_job_detail_df(job_id)
     if job_df.empty:
         st.error("This job could not be found.")
-        if st.button("Back to Jobs"):
-            go_to_jobs()
+        if st.button("Back to Applications"):
+            go_to_opportunities()
         return
 
     job = job_df.iloc[0].to_dict()
     skills_df = get_job_skills_for_job_df(job_id)
     certs_df = get_job_certifications_for_job_df(job_id)
     applications_df = get_applications_for_job_df(job.get("source_file", ""))
+    selected_application_id = st.session_state.get("selected_application_id")
+    if selected_application_id is not None and not applications_df.empty:
+        selected = applications_df[applications_df["id"] == selected_application_id]
+        if not selected.empty:
+            applications_df = pd.concat(
+                [selected, applications_df[applications_df["id"] != selected_application_id]],
+                ignore_index=True,
+            )
     profiles_df = get_resume_profiles_df()
     fit = build_fit_snapshot(skills_df, profiles_df, job.get("domain", ""))
 

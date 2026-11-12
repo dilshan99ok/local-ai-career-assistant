@@ -45,10 +45,11 @@ def go_to(page):
     navigate_to(page)
 
 
-def open_job_workspace(job_id):
+def open_job_workspace(job_id, application_id=None):
     if job_id is None or clean_value(job_id) == "":
         return
-    navigate_to("Jobs", job_id=int(job_id))
+    st.session_state["selected_application_id"] = application_id
+    navigate_to("Applications", job_id=int(job_id))
 
 
 def followup_state(value):
@@ -93,8 +94,8 @@ def render_quick_actions():
     if col1.button("＋ Add application", key="overview_analyze_job", type="primary", width="stretch"):
         st.session_state["open_add_application"] = True
         go_to("Applications")
-    if col2.button("View job library", key="overview_view_jobs", width="stretch"):
-        go_to("Jobs")
+    if col2.button("View opportunities", key="overview_view_jobs", width="stretch"):
+        go_to("Applications")
     if col3.button("Review resume gaps", key="overview_review_gaps", width="stretch"):
         go_to("Resume & Gaps")
 
@@ -122,19 +123,17 @@ def render_next_actions(followups_df, fit_summary):
                 st.markdown('<div class="overview-row-divider"></div>', unsafe_allow_html=True)
             col1, col2, col3, actions = st.columns([2.35, 2.1, 1.55, 1.45])
             with col1:
-                if job_id:
-                    if st.button(
-                        clean_value(row.get("job_title")) or "Untitled role",
-                        key=f"overview_open_followup_{application_id}",
-                        type="tertiary",
-                        width="stretch",
-                    ):
-                        open_job_workspace(job_id)
-                else:
-                    st.markdown(
-                        f'<div class="overview-action-title">{escape(clean_value(row.get("job_title")) or "Untitled role")}</div>',
-                        unsafe_allow_html=True,
-                    )
+                if st.button(
+                    clean_value(row.get("job_title")) or "Untitled role",
+                    key=f"overview_open_followup_{application_id}",
+                    type="tertiary",
+                    width="stretch",
+                ):
+                    if job_id:
+                        open_job_workspace(job_id, application_id=application_id)
+                    else:
+                        st.session_state["editing_application_id"] = application_id
+                        navigate_to("Applications")
                 st.markdown(
                     f'<div class="overview-action-meta">{escape(clean_value(row.get("company")) or "Unknown company")}</div>',
                     unsafe_allow_html=True,

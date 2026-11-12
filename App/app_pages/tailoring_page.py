@@ -104,7 +104,8 @@ def render_tailoring():
                 st.caption(f"Resume fit · {clean_value(selected_job_row.iloc[0].get('fit_display')) or '—'}")
         with action_col:
             if st.button("View workspace", key="tailoring_view_workspace", width="stretch"):
-                navigate_to("Jobs", job_id=int(job_id))
+                st.session_state["selected_application_id"] = None
+                navigate_to("Applications", job_id=int(job_id))
 
     if st.session_state.get("tailoring_source_job_id") != job_id:
         st.session_state.pop("tailoring_profile_selector", None)

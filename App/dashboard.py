@@ -10,7 +10,6 @@ from App.app_utils.navigation import (
 from App.app_pages.dashboard_page import render_dashboard
 from App.app_pages.applications_page import render_applications
 from App.app_pages.skills_page import render_skills
-from App.app_pages.jobs_page import render_jobs
 from App.app_pages.job_detail_page import render_job_detail
 from App.app_pages.resume_page import render_resume
 from App.app_pages.tailoring_page import render_tailoring
@@ -48,10 +47,12 @@ page_options = list(PAGE_OPTIONS)
 if "current_page" not in st.session_state:
     st.session_state["current_page"] = st.session_state.get("selected_page", "Overview")
 if st.session_state.get("current_page") == "Job Detail":
-    st.session_state["current_page"] = "Jobs"
+    st.session_state["current_page"] = "Applications"
     st.session_state["active_job_detail"] = bool(
         st.session_state.get("selected_job_id")
     )
+if st.session_state.get("current_page") == "Jobs":
+    st.session_state["current_page"] = "Applications"
 if st.session_state.get("current_page") == "Dashboard":
     st.session_state["current_page"] = "Overview"
 if st.session_state.get("current_page") not in page_options:
@@ -59,6 +60,8 @@ if st.session_state.get("current_page") not in page_options:
 requested_page = st.session_state.pop("requested_page", None)
 if requested_page == "Dashboard":
     requested_page = "Overview"
+if requested_page == "Jobs":
+    requested_page = "Applications"
 if requested_page in page_options:
     st.session_state["requested_route"] = {"page": requested_page, "job_id": None}
 apply_requested_route(st.session_state)
@@ -123,11 +126,11 @@ with st.sidebar.container():
 render_scroll_reset()
 render_back_navigation()
 
-if st.session_state.get("active_job_detail") and page == "Jobs":
+if st.session_state.get("active_job_detail") and page == "Applications":
     renderer = render_job_detail
 elif st.session_state.get("active_job_detail"):
     st.session_state["active_job_detail"] = False
-    st.session_state["jobs_table_reset"] = st.session_state.get("jobs_table_reset", 0) + 1
+    st.session_state["opportunities_table_reset"] = st.session_state.get("opportunities_table_reset", 0) + 1
     page = st.session_state["current_page"]
     renderer = None
 else:
@@ -138,7 +141,6 @@ if renderer is None:
         "Overview": render_dashboard,
         "Applications": render_applications,
         "Skills": render_skills,
-        "Jobs": render_jobs,
         "Resume & Gaps": render_resume,
         "Tailoring Studio": render_tailoring,
     }[page]

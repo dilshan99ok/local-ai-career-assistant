@@ -22,6 +22,7 @@ An AI-powered career assistant designed to analyze job descriptions, extract ski
 ## Dashboard Workflows
 
 - Review AI extraction before saving an application.
+- Browse applications and analyzed jobs in one list, with filters for all opportunities, applications, and jobs not yet applied to.
 - Track application stages, follow-ups, contacts, resume versions, and cover letters.
 - Open each saved application in one profile to update its details, documents, and outcomes; the list and job workspace lead to the same editor.
 - Inspect saved job descriptions with related skills and certifications.
@@ -29,7 +30,7 @@ An AI-powered career assistant designed to analyze job descriptions, extract ski
 - Upload and remove category CVs for IT Support, Networking, Systems Administration, and other roles. Each job uses a matching CV for fit checks when available; removing a base CV keeps its saved job drafts.
 - CV uploads retain the original PDF or DOCX for a formatted preview. DOCX previews use Microsoft Word on Windows. CVs uploaded before this feature need their original file attached once from the View dialog.
 - Choose a starting CV in Tailoring Studio, review a job-specific draft, save it separately, and download an editable DOCX from Tailoring Studio or the job workspace.
-- Export and import application, job, skill, and certification data as CSV.
+- Export the filtered opportunities list as CSV.
 - View status pipeline, application trends, follow-up history, and skill demand.
 
 ## Project Status

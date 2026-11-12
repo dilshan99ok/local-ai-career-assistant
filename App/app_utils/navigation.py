@@ -4,26 +4,30 @@ import streamlit as st
 
 
 PAGE_OPTIONS = (
-    "Overview", "Applications", "Skills", "Jobs", "Resume & Gaps", "Tailoring Studio"
+    "Overview", "Applications", "Skills", "Resume & Gaps", "Tailoring Studio"
 )
 
 
 def current_route(state):
     page = state.get("current_page", state.get("selected_page", "Overview"))
+    if page == "Jobs":
+        page = "Applications"
     if page not in PAGE_OPTIONS:
         page = "Overview"
-    job_id = state.get("selected_job_id") if page == "Jobs" and state.get("active_job_detail") else None
+    job_id = state.get("selected_job_id") if page == "Applications" and state.get("active_job_detail") else None
     return {"page": page, "job_id": int(job_id) if job_id else None}
 
 
 def route_label(route):
-    return "Job workspace" if route.get("page") == "Jobs" and route.get("job_id") else route["page"]
+    return "Job details" if route.get("page") in {"Applications", "Jobs"} and route.get("job_id") else route["page"]
 
 
 def push_route(state, page, job_id=None):
+    if page == "Jobs":
+        page = "Applications"
     if page not in PAGE_OPTIONS:
         raise ValueError(f"Unknown page: {page}")
-    destination = {"page": page, "job_id": int(job_id) if page == "Jobs" and job_id is not None else None}
+    destination = {"page": page, "job_id": int(job_id) if page == "Applications" and job_id is not None else None}
     if destination == current_route(state):
         return False
     history = list(state.get("navigation_history", []))
@@ -33,7 +37,7 @@ def push_route(state, page, job_id=None):
     return True
 
 
-def pop_route(state, fallback="Jobs"):
+def pop_route(state, fallback="Applications"):
     history = list(state.get("navigation_history", []))
     destination = history.pop() if history else {"page": fallback, "job_id": None}
     state["navigation_history"] = history
@@ -45,15 +49,17 @@ def apply_requested_route(state):
     destination = state.pop("requested_route", None)
     if not destination:
         return
+    if destination["page"] == "Jobs":
+        destination["page"] = "Applications"
     state["scroll_to_top"] = state.get("scroll_to_top", 0) + 1
     state["current_page"] = destination["page"]
-    state["active_job_detail"] = destination["page"] == "Jobs" and destination.get("job_id") is not None
+    state["active_job_detail"] = destination["page"] == "Applications" and destination.get("job_id") is not None
     if state["active_job_detail"]:
         state["selected_job_id"] = int(destination["job_id"])
-    elif destination["page"] == "Jobs":
+    elif destination["page"] == "Applications":
         # AgGrid keeps row selection while a detail view is open. Remounting
         # clears only that selection; the search, filters, and page stay put.
-        state["jobs_table_reset"] = state.get("jobs_table_reset", 0) + 1
+        state["opportunities_table_reset"] = state.get("opportunities_table_reset", 0) + 1
     elif destination["page"] == "Overview":
         # Clear AgGrid's previous selection before reopening Overview.
         state["overview_recent_jobs_reset"] = state.get("overview_recent_jobs_reset", 0) + 1
@@ -63,8 +69,8 @@ def clear_sidebar_history(state):
     state["navigation_history"] = []
     state["active_job_detail"] = False
     state.pop("requested_route", None)
-    if state.get("current_page", state.get("selected_page")) == "Jobs":
-        state["jobs_table_reset"] = state.get("jobs_table_reset", 0) + 1
+    if state.get("current_page", state.get("selected_page")) in {"Jobs", "Applications"}:
+        state["opportunities_table_reset"] = state.get("opportunities_table_reset", 0) + 1
     if state.get("current_page", state.get("selected_page")) == "Overview":
         state["overview_recent_jobs_reset"] = state.get("overview_recent_jobs_reset", 0) + 1
 
@@ -73,7 +79,7 @@ def sidebar_navigate(state, page):
     """Open a main page, including its list when the page is already selected."""
     if page not in PAGE_OPTIONS:
         raise ValueError(f"Unknown page: {page}")
-    if current_route(state) == {"page": page, "job_id": None}:
+    if current_route(state) == {"page": page, "job_id": None} and not state.get("editing_application_id"):
         return False
     clear_sidebar_history(state)
     state["current_page"] = page
@@ -92,7 +98,7 @@ def navigate_to(page, job_id=None):
         st.rerun()
 
 
-def go_back(fallback="Jobs"):
+def go_back(fallback="Applications"):
     pop_route(st.session_state, fallback=fallback)
     st.rerun()
 

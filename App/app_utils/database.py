@@ -1611,84 +1611,8 @@ def extend_application_follow_up(application_id, days=7):
 
 def delete_application(application_id):
     connection = get_connection()
-    cursor = connection.cursor()
-
-    cursor.execute(
-        """
-        SELECT source_file
-        FROM applications
-        WHERE id = ?
-        """,
-        (application_id,),
-    )
-
-    result = cursor.fetchone()
-    source_file = result[0] if result else None
-
-    cursor.execute(
-        """
-        DELETE FROM applications
-        WHERE id = ?
-        """,
-        (application_id,),
-    )
-
-    if source_file:
-        cursor.execute(
-            """
-            SELECT COUNT(*)
-            FROM applications
-            WHERE source_file = ?
-            """,
-            (source_file,),
-        )
-
-        remaining_applications = cursor.fetchone()[0]
-
-        if remaining_applications == 0:
-            cursor.execute(
-                """
-                SELECT id
-                FROM jobs
-                WHERE source_file = ?
-                """,
-                (source_file,),
-            )
-
-            job_ids = [row[0] for row in cursor.fetchall()]
-
-            for job_id in job_ids:
-                cursor.execute(
-                    """
-                    DELETE FROM job_items
-                    WHERE job_id = ?
-                    """,
-                    (job_id,),
-                )
-
-                cursor.execute(
-                    """
-                    DELETE FROM job_skills
-                    WHERE job_id = ?
-                    """,
-                    (job_id,),
-                )
-
-                cursor.execute(
-                    """
-                    DELETE FROM job_certifications
-                    WHERE job_id = ?
-                    """,
-                    (job_id,),
-                )
-
-            cursor.execute(
-                """
-                DELETE FROM jobs
-                WHERE source_file = ?
-                """,
-                (source_file,),
-            )
-
-    connection.commit()
-    connection.close()
+    try:
+        with connection:
+            connection.execute("DELETE FROM applications WHERE id = ?", (int(application_id),))
+    finally:
+        connection.close()
