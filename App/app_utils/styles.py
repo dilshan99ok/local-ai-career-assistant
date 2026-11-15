@@ -184,30 +184,18 @@ def apply_styles():
             padding: 0.45rem 0.2rem;
         }
 
-        [class*="st-key-resume_cv_"] {
+        .st-key-resume_cv_list {
             max-width: 1100px;
         }
 
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.resume-card-name) {
             max-width: 1100px;
-            padding: 0.5rem 0.75rem !important;
-            transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+            padding: 0.45rem 0.8rem !important;
         }
 
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.resume-card-name):hover {
-            border-color: rgba(142,197,240,0.34) !important;
-        }
-
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.resume-card-selected) {
-            border-color: rgba(115,186,244,0.7) !important;
-            background: linear-gradient(90deg, rgba(90,154,213,0.13), rgba(90,154,213,0.025)) !important;
-            box-shadow: inset 3px 0 0 #72b9f2, 0 0 0 1px rgba(115,186,244,0.12);
-            animation: resume-card-focus 650ms ease-out;
-        }
-
-        @keyframes resume-card-focus {
-            from { box-shadow: inset 3px 0 0 #72b9f2, 0 0 0 0 rgba(115,186,244,0.5); }
-            to { box-shadow: inset 3px 0 0 #72b9f2, 0 0 0 1px rgba(115,186,244,0.12); }
+        .resume-list-divider {
+            border-top: 1px solid rgba(255,255,255,0.09);
+            margin: 0.25rem 0;
         }
 
         .resume-card-name {
@@ -234,18 +222,6 @@ def apply_styles():
             border-radius: 999px;
             color: #d4e9fa;
             background: rgba(142,197,240,0.08);
-            font-size: 0.68rem;
-            font-weight: 650;
-            vertical-align: middle;
-        }
-
-        .resume-card-selected {
-            display: inline-block;
-            margin-left: 0.6rem;
-            padding: 0.1rem 0.42rem;
-            border-radius: 999px;
-            color: #b6ddfa;
-            background: rgba(115,186,244,0.16);
             font-size: 0.68rem;
             font-weight: 650;
             vertical-align: middle;
@@ -286,11 +262,6 @@ def apply_styles():
             font-size: 0.78rem;
         }
 
-        @media (prefers-reduced-motion: reduce) {
-            div[data-testid="stVerticalBlockBorderWrapper"]:has(.resume-card-selected) {
-                animation: none;
-            }
-        }
 
         /* Metric cards */
         [data-testid="stMetric"] {

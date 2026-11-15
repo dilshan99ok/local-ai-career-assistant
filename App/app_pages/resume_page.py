@@ -242,69 +242,62 @@ def render_profile_tab(profiles_df):
         render_add_cvs(profiles_df)
     if profiles_df.empty:
         st.info("No CVs yet.")
-        return None
+        return
 
     st.subheader("Your CVs")
-    selected_id = st.session_state.get("resume_inspect_id")
-    if selected_id not in set(profiles_df["id"].astype(int)):
-        selected_id = int(profiles_df.iloc[0]["id"])
-        st.session_state["resume_inspect_id"] = selected_id
-
-    for _, row in profiles_df.iterrows():
-        profile_id = int(row["id"])
-        is_selected = profile_id == selected_id
-        with st.container(border=True, key=f"resume_cv_{profile_id}"):
-            info_col, actions_col = st.columns([4.6, 2.2], vertical_alignment="center")
-            with info_col:
-                label = escape(clean_value(row["profile_name"]))
-                category = escape(clean_value(row.get("target_domain")) or "General")
-                filename = escape(clean_value(row.get("source_filename")) or "Pasted text")
-                category_badge = f'<span class="resume-card-category">{category}</span>'
-                badge = '<span class="resume-card-selected">Inspecting</span>' if is_selected else ""
-                st.markdown(
-                    f'<div class="resume-card-name">{label}{category_badge}{badge}</div>'
-                    f'<div class="resume-card-meta">{filename}</div>',
-                    unsafe_allow_html=True,
-                )
-            with actions_col:
-                view_col, inspect_col, remove_col = st.columns([1, 1.2, 1], gap="small")
-                if view_col.button(
-                    "View", key=f"view_resume_profile_{profile_id}",
-                    type="tertiary", icon=":material/visibility:",
-                ):
-                    show_resume_preview(
-                        profile_id,
-                        clean_value(row["profile_name"]),
-                        clean_value(row.get("resume_text")),
+    with st.container(border=True, key="resume_cv_list"):
+        for index, (_, row) in enumerate(profiles_df.iterrows()):
+            profile_id = int(row["id"])
+            if index:
+                st.markdown('<div class="resume-list-divider"></div>', unsafe_allow_html=True)
+            with st.container(key=f"resume_cv_{profile_id}"):
+                info_col, actions_col = st.columns([5, 1.5], vertical_alignment="center")
+                with info_col:
+                    label = escape(clean_value(row["profile_name"]))
+                    category = escape(clean_value(row.get("target_domain")) or "General")
+                    filename = escape(clean_value(row.get("source_filename")) or "Pasted text")
+                    skill_count = len(load_skills(row))
+                    updated = clean_value(row.get("updated_at"))[:10]
+                    skill_label = "skill" if skill_count == 1 else "skills"
+                    details = f"{filename} · {skill_count} {skill_label}"
+                    if updated:
+                        details += f" · Updated {escape(updated)}"
+                    st.markdown(
+                        f'<div class="resume-card-name">{label}'
+                        f'<span class="resume-card-category">{category}</span></div>'
+                        f'<div class="resume-card-meta">{details}</div>',
+                        unsafe_allow_html=True,
                     )
-                if not is_selected and inspect_col.button(
-                    "Inspect", key=f"inspect_resume_profile_{profile_id}",
-                    type="tertiary", icon=":material/analytics:",
-                ):
-                    st.session_state["resume_inspect_id"] = profile_id
-                    st.rerun()
-                if remove_col.button(
-                    "Remove", key=f"remove_resume_profile_{profile_id}",
-                    type="tertiary", icon=":material/delete_outline:",
-                ):
-                    st.session_state["confirm_remove_cv_id"] = profile_id
-                    st.rerun()
-            if st.session_state.get("confirm_remove_cv_id") == profile_id:
-                st.warning("Remove this CV? Saved job drafts will remain available.")
-                confirm_col, cancel_col = st.columns([1, 1])
-                if confirm_col.button("Remove CV", key=f"confirm_remove_resume_profile_{profile_id}",
-                                      type="primary"):
-                    with st.spinner("Removing CV…"):
-                        delete_resume_profile(profile_id)
-                    st.session_state.pop("confirm_remove_cv_id", None)
-                    st.session_state["resume_profile_removed"] = True
-                    st.rerun()
-                if cancel_col.button("Cancel", key=f"cancel_remove_resume_profile_{profile_id}"):
-                    st.session_state.pop("confirm_remove_cv_id", None)
-                    st.rerun()
-
-    selected_row = profiles_df[profiles_df["id"] == selected_id].iloc[0]
-    return selected_row
+                with actions_col:
+                    view_col, remove_col = st.columns(2, gap="small")
+                    if view_col.button(
+                        "View", key=f"view_resume_profile_{profile_id}",
+                        type="tertiary", icon=":material/visibility:",
+                    ):
+                        show_resume_preview(
+                            profile_id,
+                            clean_value(row["profile_name"]),
+                            clean_value(row.get("resume_text")),
+                        )
+                    if remove_col.button(
+                        "Remove", key=f"remove_resume_profile_{profile_id}",
+                        type="tertiary", icon=":material/delete_outline:",
+                    ):
+                        st.session_state["confirm_remove_cv_id"] = profile_id
+                        st.rerun()
+                if st.session_state.get("confirm_remove_cv_id") == profile_id:
+                    st.warning("Remove this CV? Saved job drafts will remain available.")
+                    confirm_col, cancel_col = st.columns([1, 1])
+                    if confirm_col.button("Remove CV", key=f"confirm_remove_resume_profile_{profile_id}",
+                                          type="primary"):
+                        with st.spinner("Removing CV…"):
+                            delete_resume_profile(profile_id)
+                        st.session_state.pop("confirm_remove_cv_id", None)
+                        st.session_state["resume_profile_removed"] = True
+                        st.rerun()
+                    if cancel_col.button("Cancel", key=f"cancel_remove_resume_profile_{profile_id}"):
+                        st.session_state.pop("confirm_remove_cv_id", None)
+                        st.rerun()
 
 
 def render_inventory_tab(selected_row):
@@ -418,11 +411,28 @@ def render_resume():
     st.title("Resumes")
 
     profiles_df = get_resume_profiles_df()
-    selected_row = render_profile_tab(profiles_df)
-    if selected_row is not None:
-        st.divider()
-        skills_col, gaps_col = st.columns(2, gap="large")
-        with skills_col:
-            render_inventory_tab(selected_row)
-        with gaps_col:
-            render_gaps_tab(selected_row)
+    render_profile_tab(profiles_df)
+    if profiles_df.empty:
+        return
+
+    st.divider()
+    st.subheader("CV insights")
+    profile_ids = profiles_df["id"].astype(int).tolist()
+    if st.session_state.get("resume_inspect_id") not in profile_ids:
+        st.session_state["resume_inspect_id"] = profile_ids[0]
+    profile_labels = {
+        int(row["id"]): f"{clean_value(row['profile_name'])} · {clean_value(row.get('target_domain')) or 'General'}"
+        for _, row in profiles_df.iterrows()
+    }
+    selected_id = st.selectbox(
+        "CV to analyze", profile_ids,
+        format_func=lambda profile_id: profile_labels[profile_id],
+        key="resume_inspect_id",
+        width=440,
+    )
+    selected_row = profiles_df[profiles_df["id"] == selected_id].iloc[0]
+    skills_col, gaps_col = st.columns(2, gap="large")
+    with skills_col:
+        render_inventory_tab(selected_row)
+    with gaps_col:
+        render_gaps_tab(selected_row)
