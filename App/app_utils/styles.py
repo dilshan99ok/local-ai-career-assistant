@@ -262,6 +262,146 @@ def apply_styles():
             font-size: 0.78rem;
         }
 
+        .job-cv-comparison,
+        .job-skill-evidence {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+            gap: 0.8rem;
+            margin: 0.5rem 0 1.4rem;
+        }
+
+        .job-cv-card,
+        .job-skill-panel {
+            min-width: 0;
+            border: 1px solid rgba(255,255,255,0.11);
+            border-radius: 0.75rem;
+            background: rgba(255,255,255,0.025);
+            padding: 0.95rem 1.1rem;
+        }
+
+        .job-cv-card.recommended {
+            border-color: rgba(112,190,242,0.7);
+            background: rgba(112,190,242,0.08);
+        }
+
+        .job-cv-top,
+        .job-skill-heading {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.8rem;
+        }
+
+        .job-cv-name {
+            color: #f4f7fb;
+            font-size: 0.96rem;
+            font-weight: 700;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+
+        .job-cv-category,
+        .job-cv-count,
+        .job-cv-score-label {
+            color: rgba(232,238,246,0.62);
+            font-size: 0.76rem;
+        }
+
+        .job-cv-pick {
+            display: inline-block;
+            margin-left: 0.5rem;
+            padding: 0.12rem 0.45rem;
+            border-radius: 999px;
+            background: rgba(112,190,242,0.16);
+            color: #a6d9ff;
+            font-size: 0.68rem;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+
+        .job-cv-score-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            flex-shrink: 0;
+            line-height: 1.25;
+        }
+
+        .job-cv-score {
+            color: #eaf6ff;
+            font-size: 1.45rem;
+            font-weight: 700;
+        }
+
+        .job-cv-score-empty {
+            color: rgba(232,238,246,0.6);
+            font-size: 0.76rem;
+            text-align: right;
+        }
+
+        .job-cv-bar {
+            height: 0.45rem;
+            margin: 0.95rem 0 0.4rem;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.12);
+        }
+
+        .job-cv-bar span {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: #80c7f3;
+        }
+
+        .job-skill-panel.found {
+            border-top: 2px solid #61c59a;
+        }
+
+        .job-skill-panel.missing {
+            border-top: 2px solid #e4b56d;
+        }
+
+        .job-skill-heading {
+            align-items: center;
+            color: #f4f7fb;
+            font-size: 0.9rem;
+            font-weight: 650;
+        }
+
+        .job-skill-heading strong {
+            font-size: 1.1rem;
+        }
+
+        .job-skill-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.85rem;
+        }
+
+        .job-skill-chip {
+            padding: 0.3rem 0.55rem;
+            border-radius: 0.4rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.055);
+            color: #e8eef6;
+            font-size: 0.8rem;
+            line-height: 1.35;
+        }
+
+        .job-skill-empty {
+            color: rgba(232,238,246,0.62);
+            font-size: 0.8rem;
+        }
+
+        @media (max-width: 650px) {
+            .job-cv-comparison,
+            .job-skill-evidence {
+                grid-template-columns: 1fr;
+            }
+        }
+
 
         /* Metric cards */
         [data-testid="stMetric"] {

@@ -1,3 +1,5 @@
+from html import escape
+
 import pandas as pd
 import streamlit as st
 
@@ -205,18 +207,68 @@ def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, recommendation):
         if st.button("Create tailored draft", key=f"create_tailored_from_pick_{job_id}"):
             go_to_tailoring(job_id)
 
-    with st.expander("Compare all CVs", expanded=not bool(recommendation)):
-        for _, row in rankings.iterrows():
-            score = f"{int(row['score'])}% skill overlap" if pd.notna(row["score"]) else "No extracted skills to compare"
-            st.markdown(f"**{row['profile_name']}** · {row['target_domain'] or 'General'} · {score}")
-    with st.expander("Detected skill evidence"):
-        matched, gaps = st.columns(2, gap="large")
-        with matched:
-            st.markdown("**Found in selected CV**")
-            st.write(", ".join(fit["matched"]["canonical_skill"].dropna().unique()) or "None detected")
-        with gaps:
-            st.markdown("**Not found in selected CV**")
-            st.write(", ".join(fit["missing"]["canonical_skill"].dropna().unique()) or "None detected")
+    render_cv_comparison(rankings, recommendation)
+    render_skill_evidence(fit)
+
+
+def render_cv_comparison(rankings, recommendation):
+    st.subheader("Compare CVs")
+    selected_id = recommendation["selected_profile_id"] if recommendation else None
+    cards = []
+    for _, row in rankings.iterrows():
+        profile_id = int(row["profile_id"])
+        recommended = selected_id is not None and profile_id == int(selected_id)
+        score = int(row["score"]) if pd.notna(row["score"]) else None
+        name = escape(clean_value(row["profile_name"]) or "Untitled CV")
+        category = escape(clean_value(row["target_domain"]) or "General")
+        badge = '<span class="job-cv-pick">AI pick</span>' if recommended else ""
+        if score is None:
+            score_html = '<span class="job-cv-score-empty">No skill comparison</span>'
+            bar = ""
+        else:
+            matched = int(row["matched"])
+            requested = int(row["requested"])
+            score_html = f'<strong class="job-cv-score">{score}%</strong><span class="job-cv-score-label">skill overlap</span>'
+            bar = (
+                f'<div class="job-cv-bar" role="progressbar" aria-label="{name} skill overlap" '
+                f'aria-valuenow="{score}" aria-valuemin="0" aria-valuemax="100">'
+                f'<span style="width: {score}%"></span></div>'
+                f'<div class="job-cv-count">{matched} of {requested} job skills detected</div>'
+            )
+        cards.append(
+            f'<div class="job-cv-card{" recommended" if recommended else ""}">'
+            f'<div class="job-cv-top"><div><div class="job-cv-name">{name}{badge}</div>'
+            f'<div class="job-cv-category">{category}</div></div>'
+            f'<div class="job-cv-score-wrap">{score_html}</div></div>{bar}</div>'
+        )
+    st.markdown('<div class="job-cv-comparison">' + "".join(cards) + "</div>", unsafe_allow_html=True)
+
+
+def render_skill_evidence(fit):
+    st.subheader("Skill evidence")
+    matched = fit["matched"].get("canonical_skill", pd.Series(dtype=str)).dropna().drop_duplicates().tolist()
+    missing = fit["missing"].get("canonical_skill", pd.Series(dtype=str)).dropna().drop_duplicates().tolist()
+    if not matched and not missing:
+        st.info("No extracted skills to compare yet.")
+        return
+
+    def panel(title, skills, tone):
+        chips = "".join(f'<span class="job-skill-chip">{escape(str(skill))}</span>' for skill in skills)
+        if not chips:
+            chips = '<span class="job-skill-empty">None detected</span>'
+        return (
+            f'<div class="job-skill-panel {tone}"><div class="job-skill-heading">'
+            f'<span>{title}</span><strong>{len(skills)}</strong></div>'
+            f'<div class="job-skill-chips">{chips}</div></div>'
+        )
+
+    st.markdown(
+        '<div class="job-skill-evidence">'
+        + panel("Found in selected CV", matched, "found")
+        + panel("Not detected in selected CV", missing, "missing")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_packet_tab(job_id, applications_df):
