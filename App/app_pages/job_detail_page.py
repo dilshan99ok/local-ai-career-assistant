@@ -241,11 +241,9 @@ def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recomm
         return
 
     rankings = fit["rankings"]
-    if recommendation:
-        render_review_outcome(recommendation, profiles_df)
-    render_cv_comparison(rankings, recommendation, checklist["criteria"] if checklist else [])
-    checklist = render_job_checklist(job, job_id, checklist, expanded=not bool(recommendation))
     if checklist is None or not checklist["criteria"]:
+        render_cv_comparison(rankings, recommendation, checklist["criteria"] if checklist else [])
+        render_job_checklist(job, job_id, checklist, expanded=True)
         return
 
     if st.button(
@@ -260,6 +258,11 @@ def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recomm
             st.rerun()
         except (RuntimeError, ValueError) as error:
             st.error(f"CV review could not be completed: {error}")
+
+    if recommendation:
+        render_review_outcome(recommendation, profiles_df)
+    render_cv_comparison(rankings, recommendation, checklist["criteria"])
+    render_job_checklist(job, job_id, checklist, expanded=not bool(recommendation))
 
     if recommendation:
         render_screening_result(job_id, profiles_df, checklist["criteria"], recommendation, fit["requested"])
@@ -628,20 +631,22 @@ def render_job_detail():
     )
 
     render_job_header(job, job_id, applications_df, fit, recommendation, checklist)
-    overview_tab, fit_tab, packet_tab, tracking_tab = st.tabs(
-        ["Overview", "Fit & gaps", "Application packet", "Tracking"]
+    section = st.segmented_control(
+        "Job section", ["Overview", "Fit & gaps", "Application packet", "Tracking"],
+        default="Overview", required=True, key=f"job_detail_section_{job_id}",
+        label_visibility="collapsed",
     )
 
-    with overview_tab:
+    if section == "Overview":
         render_overview_tab(job, skills_df)
         st.subheader("Certifications")
         if certs_df.empty:
             st.info("No certifications were extracted for this role.")
         else:
             st.dataframe(build_certification_summary(certs_df), width="stretch", hide_index=True)
-    with fit_tab:
+    elif section == "Fit & gaps":
         render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recommendation)
-    with packet_tab:
+    elif section == "Application packet":
         render_packet_tab(job_id, applications_df)
-    with tracking_tab:
+    else:
         render_tracking_tab(applications_df)
