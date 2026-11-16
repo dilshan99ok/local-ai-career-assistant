@@ -7,13 +7,14 @@ import re
 from Scripts.ai_provider import OpenAIProvider, configured_model
 
 
-SCHEMA = "ats-preview-v1"
-RULES = 1
+SCHEMA = "ats-preview-v2"
+RULES = 2
 SECTION_CHARS = 7000
 MAX_SECTIONS = 16
 STATUSES = {"Demonstrated", "Partially demonstrated", "Not shown", "Unable to assess"}
 KINDS = {"Required", "Preferred", "Screening"}
 ISSUES = {"none", "unclear wording", "missing CV evidence", "unmet requirement"}
+UNVERIFIED_SOURCE = "Original file unavailable; extraction cannot be checked."
 
 
 def parse_json(raw):
@@ -123,16 +124,30 @@ def generate_checklist(job, provider=None):
     return validate_checklist(unique, description)
 
 
-def extraction_issues(profile):
+def extraction_report(profile):
     try:
         report = json.loads(profile.get("extraction_report_json") or "{}")
     except (TypeError, json.JSONDecodeError):
         report = {}
-    issues = report.get("issues", []) if isinstance(report, dict) else []
-    issues = [str(value) for value in issues if str(value).strip()] if isinstance(issues, list) else []
+    return report if isinstance(report, dict) else {}
+
+
+def extraction_issues(profile):
+    issues = extraction_report(profile).get("issues", [])
+    issues = [str(value) for value in issues if str(value).strip() and str(value) != UNVERIFIED_SOURCE] if isinstance(issues, list) else []
     if not str(profile.get("resume_text") or "").strip():
         issues.append("No readable CV text is saved.")
     return issues
+
+
+def extraction_warnings(profile):
+    report = extraction_report(profile)
+    warnings = report.get("warnings", [])
+    warnings = [str(value) for value in warnings if str(value).strip()] if isinstance(warnings, list) else []
+    issues = report.get("issues", [])
+    if isinstance(issues, list) and UNVERIFIED_SOURCE in issues and UNVERIFIED_SOURCE not in warnings:
+        warnings.append(UNVERIFIED_SOURCE)
+    return warnings
 
 
 def fingerprint(job, profiles_df, checklist=None, rankings=None):
@@ -304,6 +319,7 @@ def review_pool(job, profiles_df, rankings, checklist, provider=None):
         sections = split_sections(profile.get("resume_text") or "")
         reviewed, omitted = sections[:MAX_SECTIONS], sections[MAX_SECTIONS:]
         issues = extraction_issues(profile)
+        warnings = extraction_warnings(profile)
         match = rankings[rankings["profile_id"] == int(profile["id"])]
         overlap = int(match.iloc[0]["matched"]) if not match.empty else 0
         answers = []
@@ -317,6 +333,7 @@ def review_pool(job, profiles_df, rankings, checklist, provider=None):
         reviews.append({"profile_id": int(profile["id"]),
                         "profile_name": str(profile.get("profile_name") or ""),
                         "complete": not incomplete, "extraction_issues": issues,
+                        "extraction_warnings": warnings,
                         "reviewed_sections": [metadata(chunk) for chunk in reviewed],
                         "omitted_sections": [metadata(chunk) for chunk in omitted],
                         "assessments": combine_assessments(criteria, answers, incomplete)})

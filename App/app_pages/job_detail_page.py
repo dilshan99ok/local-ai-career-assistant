@@ -276,9 +276,12 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
     if job_skills_df is not None:
         selected_fit = build_fit_snapshot(job_skills_df, profiles_df, profile_id=chosen)
         render_skill_evidence(selected_fit)
-    st.caption("Complete review" if review["complete"] else "Incomplete review")
+    st.caption("Complete review of saved CV text" if review["complete"] else "Incomplete review")
     if review["extraction_issues"]:
         st.warning("Extraction: " + " · ".join(review["extraction_issues"]))
+    if review.get("extraction_warnings"):
+        st.info("Source verification: " + " · ".join(review["extraction_warnings"])
+                + " The review uses the saved extracted CV text.")
     if review["omitted_sections"]:
         st.warning(f"{len(review['omitted_sections'])} section(s) not reviewed because of the request size limit.")
     st.write(f"Reviewed {len(review['reviewed_sections'])} section(s); "
@@ -294,21 +297,26 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
 
     by_id = {item["criterion_id"]: item for item in review["assessments"]}
     for kind in ("Required", "Preferred", "Screening"):
-        rows = []
-        for criterion in criteria:
-            if criterion["kind"] != kind:
-                continue
+        kind_criteria = [item for item in criteria if item["kind"] == kind]
+        if kind_criteria:
+            st.markdown(f"#### {kind} criteria" if kind != "Screening" else "#### Screening conditions")
+        for criterion in kind_criteria:
             item = by_id[criterion["id"]]
             status = item["status"]
             if kind == "Screening" and status != "Demonstrated":
                 status = "Not met" if item["issue_type"] == "unmet requirement" else "Confirm · " + status
-            rows.append({"Criterion": criterion["criterion"], "Source wording": criterion["source"],
-                         "Level / alternatives": " · ".join(v for v in (
-                             criterion["requested_level"], criterion["alternatives"]) if v),
-                         "Assessment": status, "Reason": item["reason"], "CV excerpt": item["evidence"]})
-        if rows:
-            st.markdown(f"#### {kind} criteria" if kind != "Screening" else "#### Screening conditions")
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            with st.container(border=True):
+                title_col, status_col = st.columns([4, 1], vertical_alignment="center")
+                title_col.markdown(f"**{criterion['criterion']}**")
+                status_col.caption(status)
+                st.caption(f"Job ad: {criterion['source']}")
+                if criterion["requested_level"] or criterion["alternatives"]:
+                    st.caption(" · ".join(value for value in (
+                        criterion["requested_level"], criterion["alternatives"]) if value))
+                if item["reason"]:
+                    st.write(item["reason"])
+                if item["evidence"]:
+                    st.caption(f"CV evidence: {item['evidence']}")
 
 
 def render_required_criteria_summary(review, criteria):

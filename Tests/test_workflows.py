@@ -16,7 +16,7 @@ from Scripts.resume_helper import extract_resume_skills
 from Scripts.resume_import import extract_resume_details, extract_resume_text
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
 from Scripts.job_fit import build_job_fit_summary, build_fit_snapshot
-from Scripts.resume_recommendation import recommendation_fingerprint
+from Scripts.resume_recommendation import REVIEW_SCHEMA_VERSION, recommendation_fingerprint
 from Scripts.job_url import JobPageFetchError, fetch_job_posting
 from Scripts.skill_analysis import build_certification_summary, build_skill_demand_summary
 from Scripts.tailoring import (
@@ -247,7 +247,7 @@ class WorkflowTests(unittest.TestCase):
         checklist = {"version": 1, "criteria": [{"id": "c1", "kind": "Required",
             "criterion": "BGP", "source": "BGP routing", "requested_level": "",
             "alternatives": ""}]}
-        result = {"schema_version": "ats-preview-v1", "selected_profile_id": 2,
+        result = {"schema_version": REVIEW_SCHEMA_VERSION, "selected_profile_id": 2,
                   "cv_reviews": [{"profile_id": 2}], "suggestions": []}
         fingerprint = recommendation_fingerprint(job, profiles, checklist, rankings)
         database.save_job_resume_recommendation(9, fingerprint, result)

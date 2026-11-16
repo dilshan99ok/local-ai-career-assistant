@@ -651,32 +651,48 @@ def get_resume_profiles_df():
 
 
 def ensure_resume_extraction_reports():
-    """Record extraction issues for CVs uploaded before reports were stored."""
+    """Backfill old reports and separate unavailable originals from extraction loss."""
     from Scripts.resume_import import ResumeImportError, extract_resume_report
 
+    unavailable_source = "Original file unavailable; extraction cannot be checked."
     connection = get_connection()
     try:
         rows = connection.execute(
-            """SELECT id, source_filename, source_type, source_file
+            """SELECT id, source_filename, source_type, source_file, extraction_report_json
                FROM resume_profiles WHERE extraction_report_json IS NULL
-               OR extraction_report_json = '{}'"""
+               OR extraction_report_json = '{}' OR extraction_report_json LIKE ?""",
+            (f"%{unavailable_source}%",),
         ).fetchall()
         with connection:
             for row in rows:
-                profile_id, filename, source_type, source_file = row
-                if source_file:
+                profile_id, filename, source_type, source_file, previous = row
+                try:
+                    previous_report = json.loads(previous or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    previous_report = {}
+                if not isinstance(previous_report, dict):
+                    previous_report = {}
+                issues = previous_report.get("issues", [])
+                warnings = previous_report.get("warnings", [])
+                issues = issues if isinstance(issues, list) else []
+                warnings = warnings if isinstance(warnings, list) else []
+                if unavailable_source in issues:
+                    issues = [item for item in issues if item != unavailable_source]
+                    if unavailable_source not in warnings:
+                        warnings.append(unavailable_source)
+                elif source_file and not previous_report:
                     try:
                         report = extract_resume_report(filename, bytes(source_file))
                         issues = report["issues"]
                     except ResumeImportError as error:
                         issues = [str(error)]
-                elif str(source_type or "").upper() in {"PDF", "DOCX", "FILE"}:
-                    issues = ["Original file unavailable; extraction cannot be checked."]
-                else:
-                    issues = []
+                elif not source_file and str(source_type or "").upper() in {"PDF", "DOCX", "FILE"}:
+                    if unavailable_source not in warnings:
+                        warnings.append(unavailable_source)
                 connection.execute(
                     "UPDATE resume_profiles SET extraction_report_json = ? WHERE id = ?",
-                    (json.dumps({"issues": issues, "source_type": source_type or "Pasted text"}), profile_id),
+                    (json.dumps({"issues": issues, "warnings": warnings,
+                                 "source_type": source_type or "Pasted text"}), profile_id),
                 )
     finally:
         connection.close()
@@ -692,7 +708,7 @@ def get_job_resume_recommendation(job_id, context_hash):
         if not row:
             return None
         result = json.loads(row[0])
-        return result if result.get("schema_version") == "ats-preview-v1" and "cv_reviews" in result else None
+        return result if result.get("schema_version") == "ats-preview-v2" and "cv_reviews" in result else None
     finally:
         connection.close()
 

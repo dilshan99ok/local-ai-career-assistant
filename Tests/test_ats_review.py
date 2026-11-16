@@ -10,7 +10,7 @@ import pandas as pd
 
 from App.app_utils import database
 from Scripts.ats_review import (
-    MAX_SECTIONS, SECTION_CHARS, fingerprint, parse_assessments, rank_reviews,
+    MAX_SECTIONS, SCHEMA, SECTION_CHARS, UNVERIFIED_SOURCE, fingerprint, parse_assessments, rank_reviews,
     required_criteria_summary, review_pool, source_hash, split_sections,
 )
 from Scripts.job_fit import build_fit_snapshot
@@ -133,7 +133,7 @@ class ATSReviewTests(unittest.TestCase):
             profiles = pd.DataFrame([{"id": 1, "resume_text": "BGP", "skills_json": "[]"}])
             saved = database.get_job_cv_checklist(7)
             key = fingerprint(job, profiles, saved)
-            result = {"schema_version": "ats-preview-v1", "selected_profile_id": 1,
+            result = {"schema_version": SCHEMA, "selected_profile_id": 1,
                       "cv_reviews": [{"profile_id": 1}]}
             database.save_job_resume_recommendation(7, key, result)
             self.assertEqual(database.get_job_resume_recommendation(7, key), result)
@@ -165,6 +165,56 @@ class ATSReviewTests(unittest.TestCase):
             database.ensure_resume_extraction_reports()
             profile = database.get_resume_profiles_df().iloc[0]
             self.assertIn("page(s): 1", json.loads(profile["extraction_report_json"])["issues"][0])
+
+    def test_missing_original_is_a_warning_and_saved_text_can_be_ranked(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(database, "DB_PATH", Path(directory) / "career.db"):
+            database.initialize_database()
+            profile_id = database.save_resume_profile(
+                "Legacy CV", "Production BGP routing on Cisco IOS-XR", [],
+                source_filename="old.pdf", source_type="PDF")
+            database.ensure_resume_extraction_reports()
+            profile = database.get_resume_profiles_df().iloc[0]
+            report = json.loads(profile["extraction_report_json"])
+            self.assertEqual(report["issues"], [])
+            self.assertEqual(report["warnings"], [UNVERIFIED_SOURCE])
+            job = {"job_title": "Engineer", "raw_description": "Production BGP routing"}
+            result = review_pool(job, database.get_resume_profiles_df(),
+                                 pd.DataFrame([{"profile_id": profile_id, "matched": 1}]),
+                                 {"version": 1, "criteria": [criterion(text="Production BGP routing")]},
+                                 SectionProvider())
+            self.assertEqual(result["selected_profile_id"], profile_id)
+            self.assertFalse(result["provisional"])
+            self.assertEqual(result["cv_reviews"][0]["extraction_warnings"], [UNVERIFIED_SOURCE])
+
+    def test_confirmed_extraction_loss_still_blocks_full_review(self):
+        profiles = pd.DataFrame([{"id": 1, "profile_name": "Partial PDF",
+                                  "resume_text": "Production BGP routing on Cisco IOS-XR",
+                                  "extraction_report_json": json.dumps({"issues": ["No readable text on PDF page(s): 2"]})}])
+        result = review_pool({"job_title": "Engineer", "raw_description": "Production BGP routing"},
+                             profiles, pd.DataFrame([{"profile_id": 1, "matched": 1}]),
+                             {"version": 1, "criteria": [criterion(text="Production BGP routing")]},
+                             SectionProvider())
+        self.assertTrue(result["provisional"])
+        self.assertIsNone(result["selected_profile_id"])
+        self.assertIn("page(s): 2", result["cv_reviews"][0]["extraction_issues"][0])
+
+    def test_legacy_source_warning_moves_out_of_extraction_issues(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(database, "DB_PATH", Path(directory) / "career.db"):
+            database.initialize_database()
+            profile_id = database.save_resume_profile("Legacy CV", "Saved CV text", [],
+                                                      source_filename="old.pdf", source_type="PDF",
+                                                      extraction_report={"issues": [UNVERIFIED_SOURCE]})
+            database.ensure_resume_extraction_reports()
+            report = json.loads(database.get_resume_profiles_df().iloc[0]["extraction_report_json"])
+            self.assertEqual(report["issues"], [])
+            self.assertEqual(report["warnings"], [UNVERIFIED_SOURCE])
+
+    def test_previous_review_schema_is_not_reused(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(database, "DB_PATH", Path(directory) / "career.db"):
+            database.initialize_database()
+            old = {"schema_version": "ats-preview-v1", "selected_profile_id": 1, "cv_reviews": []}
+            database.save_job_resume_recommendation(9, "old-key", old)
+            self.assertIsNone(database.get_job_resume_recommendation(9, "old-key"))
 
 
 if __name__ == "__main__":
