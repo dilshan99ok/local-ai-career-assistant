@@ -10,7 +10,8 @@ import pandas as pd
 
 from App.app_utils import database
 from Scripts.ats_review import (
-    MAX_SECTIONS, SCHEMA, SECTION_CHARS, UNVERIFIED_SOURCE, fingerprint, parse_assessments, rank_reviews,
+    MAX_SECTIONS, SCHEMA, SECTION_CHARS, UNVERIFIED_SOURCE, checklist_guidance_hash,
+    fingerprint, generate_checklist, parse_assessments, rank_reviews,
     required_criteria_summary, review_pool, source_hash, split_sections,
 )
 from Scripts.job_fit import build_fit_snapshot
@@ -45,6 +46,60 @@ class SectionProvider:
 
 
 class ATSReviewTests(unittest.TestCase):
+    def test_checklist_keeps_separate_items_with_shared_source(self):
+        job = {"raw_description": "Experience with PC equipment, Azure AD, Office 365 and Adobe products is beneficial."}
+        rows = [
+            {"kind": "Preferred", "criterion": item, "source": job["raw_description"],
+             "requested_level": "", "alternatives": ""}
+            for item in ("PC equipment", "Azure AD", "Office 365", "Adobe products")
+        ]
+        provider = Mock()
+        provider.generate_text.return_value = json.dumps({"criteria": rows})
+        checklist = generate_checklist(job, provider)
+        self.assertEqual(len(checklist), 4)
+        self.assertTrue(all(row["kind"] == "Preferred" for row in checklist))
+        self.assertIn("Split separately assessable", provider.generate_text.call_args.args[0])
+
+    def test_duration_is_reconciled_across_sections_and_validated(self):
+        dates = "IT support analyst, January 2022 - December 2023"
+        duties = "Resolved help desk tickets for staff"
+        cv_text = dates + "\n" + "X" * 7100 + "\n" + duties
+        row = criterion(text="At least one year in an IT support role")
+        provider = Mock()
+        def respond(prompt, instructions=""):
+            if "VALIDATED SECTION EVIDENCE:" in prompt:
+                self.assertIn(dates, prompt)
+                self.assertIn(duties, prompt)
+                return json.dumps({"cv_id": 1, "assessments": [assessment("c1", "Demonstrated", duties)]})
+            quote = dates if dates in prompt.split("CV SECTION", 1)[-1] else duties
+            return json.dumps({"cv_id": 1, "assessments": [assessment("c1", "Partially demonstrated", quote)]})
+        provider.generate_text.side_effect = respond
+        profiles = pd.DataFrame([{"id": 1, "profile_name": "Support CV", "resume_text": cv_text,
+                                  "extraction_report_json": "{}"}])
+        result = review_pool({"job_title": "Support", "raw_description": row["source"]}, profiles,
+                             pd.DataFrame([{"profile_id": 1, "matched": 0}]),
+                             {"version": 1, "criteria": [row]}, provider)
+        self.assertEqual(result["cv_reviews"][0]["assessments"][0]["status"], "Demonstrated")
+        self.assertEqual(provider.generate_text.call_count, len(split_sections(cv_text)) + 1)
+
+    def test_guidance_changes_invalidate_review_fingerprint(self):
+        job = {"id": 3, "raw_description": "BGP"}
+        profiles = pd.DataFrame([{"id": 1, "resume_text": "BGP"}])
+        before = fingerprint(job, profiles, {"version": 1, "criteria": [criterion()]})
+        from Scripts import ats_review
+        original = ats_review.load_prompt
+        with patch.object(ats_review, "load_prompt", side_effect=lambda name: original(name) + " updated" if name == "cv-evidence-review" else original(name)):
+            after = fingerprint(job, profiles, {"version": 1, "criteria": [criterion()]})
+        self.assertNotEqual(before, after)
+
+    def test_legacy_checklist_guidance_is_identified(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(database, "DB_PATH", Path(directory) / "career.db"):
+            database.initialize_database()
+            database.save_job_cv_checklist(3, "source", [criterion()])
+            self.assertEqual(database.get_job_cv_checklist(3)["guidance_hash"], "")
+            database.save_job_cv_checklist(3, "source", [criterion()], checklist_guidance_hash())
+            self.assertEqual(database.get_job_cv_checklist(3)["guidance_hash"], checklist_guidance_hash())
+
     def test_saved_screening_follows_selected_cv_into_tailoring(self):
         criteria = [criterion("c1", text="Production BGP routing"),
                     criterion("c2", "Preferred", "Linux administration")]
@@ -187,6 +242,10 @@ class ATSReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown criterion ID"):
             parse_assessments(json.dumps({"cv_id": 1, "assessments": [assessment(
                 "c99", "Not shown")]}), rows, "Only a lab project", 1)
+        with self.assertRaisesRegex(ValueError, "unknown criterion ID"):
+            parse_assessments(json.dumps({"cv_id": 1, "assessments": [
+                assessment("c1", "Not shown"), assessment("c1", "Not shown")]}),
+                [criterion("c1"), criterion("c2")], "Only a lab project", 1)
 
     def test_lab_exposure_does_not_satisfy_production_level(self):
         required = criterion(text="Cisco administration")

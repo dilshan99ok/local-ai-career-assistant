@@ -604,6 +604,19 @@ Nornir, NAPALM and NetBox is required.
              "Netmiko", "Nornir", "NAPALM", "NetBox", "CI/CD"} <= found
         )
 
+    def test_generic_job_ad_words_do_not_become_skill_requirements(self):
+        description = (
+            "About us: a telecom company. Submit your request online. "
+            "The role has an on-site location and includes a laptop. "
+            "Experience with BGP and Cisco IOS-XR is required."
+        )
+        extracted = ai_helper.build_keyword_fallback_structured_data(description)
+        found = {skill["specific_skill"] for skill in extracted["structured_skills"]}
+        self.assertIn("BGP", found)
+        self.assertIn("Cisco IOS-XR", found)
+        self.assertFalse({"Service Request Management", "Laptop Support",
+                          "Onsite Support", "Telecommunications Networking"} & found)
+
     def test_direct_employer_industry_is_not_an_end_client(self):
         extracted = ai_helper.clean_extracted_data(
             {

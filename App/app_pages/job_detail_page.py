@@ -20,7 +20,7 @@ from App.app_utils.database import (
     update_application_status,
 )
 from Scripts.job_fit import build_fit_snapshot
-from Scripts.ats_review import UNVERIFIED_SOURCE
+from Scripts.ats_review import UNVERIFIED_SOURCE, checklist_guidance_hash
 from Scripts.resume_recommendation import (
     build_edits, generate_job_checklist, generate_resume_recommendation,
     recommendation_fingerprint, required_criteria_summary, source_hash, validate_checklist,
@@ -197,13 +197,23 @@ def render_job_checklist(job, job_id, checklist, expanded=False):
             try:
                 with st.spinner("Reading job requirements…", show_time=True):
                     rows = generate_job_checklist(job)
-                    save_job_cv_checklist(job_id, source_hash(job), rows)
+                    save_job_cv_checklist(job_id, source_hash(job), rows, checklist_guidance_hash())
                 st.rerun()
             except (RuntimeError, ValueError) as error:
                 st.error(f"Checklist could not be prepared: {error}")
         return None
 
     criteria = checklist["criteria"]
+    if checklist.get("guidance_hash") != checklist_guidance_hash():
+        st.info("This checklist was saved under older or unrecorded AI guidance. Review it or regenerate it to use the current rules.")
+        if st.button("Regenerate checklist", key=f"regenerate_checklist_{job_id}"):
+            try:
+                with st.spinner("Reading job requirements…", show_time=True):
+                    rows = generate_job_checklist(job)
+                    save_job_cv_checklist(job_id, source_hash(job), rows, checklist_guidance_hash())
+                st.rerun()
+            except (RuntimeError, ValueError) as error:
+                st.error(f"Checklist could not be prepared: {error}")
     counts = {kind: sum(item["kind"] == kind for item in criteria)
               for kind in ("Required", "Preferred", "Screening")}
     st.caption(" · ".join(f"{counts[kind]} {kind.lower()}" for kind in counts))
@@ -228,8 +238,8 @@ def render_job_checklist(job, job_id, checklist, expanded=False):
                 validated = validate_checklist(rows, clean_value(job.get("raw_description")))
                 if not validated:
                     raise ValueError("Add at least one criterion before saving.")
-                if validated != criteria:
-                    save_job_cv_checklist(job_id, source_hash(job), validated)
+                if validated != criteria or checklist.get("guidance_hash") != checklist_guidance_hash():
+                    save_job_cv_checklist(job_id, source_hash(job), validated, checklist_guidance_hash())
                 st.rerun()
             except ValueError as error:
                 st.error(str(error))

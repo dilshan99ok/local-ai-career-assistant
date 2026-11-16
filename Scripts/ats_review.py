@@ -8,8 +8,8 @@ from Scripts.ai_provider import OpenAIProvider, configured_model
 from Scripts.prompt_loader import load_prompt, render_prompt
 
 
-SCHEMA = "ats-preview-v2"
-RULES = 2
+SCHEMA = "ats-preview-v3"
+RULES = 3
 SECTION_CHARS = 7000
 MAX_SECTIONS = 16
 STATUSES = {"Demonstrated", "Partially demonstrated", "Not shown", "Unable to assess"}
@@ -37,6 +37,15 @@ def fold(value):
 
 def source_hash(job):
     return hashlib.sha256(str(job.get("raw_description") or "").encode("utf-8")).hexdigest()
+
+
+def guidance_hash(*names):
+    content = "\n".join(load_prompt(name) for name in names)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def checklist_guidance_hash():
+    return guidance_hash("job-checklist", "json-output-system")
 
 
 def split_sections(text, limit=SECTION_CHARS):
@@ -146,6 +155,8 @@ def extraction_warnings(profile):
 def fingerprint(job, profiles_df, checklist=None, rankings=None):
     payload = {
         "schema": SCHEMA, "rules": RULES, "model": configured_model(),
+        "review_guidance": guidance_hash("cv-evidence-review", "cv-evidence-system", "cv-duration-merge"),
+        "checklist_guidance": checklist_guidance_hash(),
         "job": {key: job.get(key) for key in ("id", "company", "job_title", "domain", "raw_description")},
         "checklist": checklist or {},
         "profiles": [{key: row.get(key) for key in (
@@ -226,6 +237,41 @@ def combine_assessments(criteria, section_answers, incomplete):
             best.update(status="Unable to assess", reason="Part of this CV was not reviewable.", issue_type="missing CV evidence")
         combined.append(best)
     return combined
+
+
+def duration_criteria(criteria):
+    """Find explicit experience durations that need evidence across sections."""
+    return [item for item in criteria if re.search(
+        r"\b(?:\d+(?:\.\d+)?\s*\+?|one|two|three|four|five)\s*(?:years?|yrs?|months?)\b",
+        f"{item['criterion']} {item['requested_level']}", re.I)]
+
+
+def reconcile_duration(job, profile, criteria, section_answers, combined, provider):
+    """Reassess duration only after evidence from all CV sections is available."""
+    duration = duration_criteria(criteria)
+    if not duration or len(section_answers) < 2:
+        return combined
+    evidence = [
+        {"section": index + 1, "assessments": [row for row in rows
+          if row["criterion_id"] in {item["id"] for item in duration}]}
+        for index, rows in enumerate(section_answers)
+    ]
+    lines = str(profile.get("resume_text") or "").splitlines()
+    date_line = re.compile(r"\b(?:20\d{2}|19\d{2}|present|current)\b", re.I)
+    chronology = "\n".join(
+        f"Line {index + 1}: {lines[index]}" for index in range(len(lines))
+        if any(date_line.search(lines[near]) for near in range(max(0, index - 2), min(len(lines), index + 3)))
+    )
+    prompt = render_prompt(
+        "cv-duration-merge", JOB_TITLE=job.get("job_title", ""),
+        CHECKLIST_JSON=json.dumps(duration, ensure_ascii=False),
+        CV_ID=int(profile["id"]), SECTION_EVIDENCE=json.dumps(evidence, ensure_ascii=False),
+        CHRONOLOGY=chronology,
+    )
+    raw = provider.generate_text(prompt, instructions=load_prompt("cv-evidence-system"))
+    merged = parse_assessments(raw, duration, str(profile.get("resume_text") or ""), int(profile["id"]))
+    by_id = {row["criterion_id"]: row for row in merged}
+    return [by_id.get(row["criterion_id"], row) for row in combined]
 
 
 def evidence_score(review, criteria, kind):
@@ -316,13 +362,16 @@ def review_pool(job, profiles_df, rankings, checklist, provider=None):
             answers.append(parse_assessments(raw, criteria, section["text"], int(profile["id"])))
         incomplete = bool(issues or omitted or not reviewed)
         metadata = lambda chunk: {key: chunk[key] for key in ("id", "start", "end", "label")}
+        combined = combine_assessments(criteria, answers, incomplete)
+        if not incomplete:
+            combined = reconcile_duration(job, profile, criteria, answers, combined, provider)
         reviews.append({"profile_id": int(profile["id"]),
                         "profile_name": str(profile.get("profile_name") or ""),
                         "complete": not incomplete, "extraction_issues": issues,
                         "extraction_warnings": warnings,
                         "reviewed_sections": [metadata(chunk) for chunk in reviewed],
                         "omitted_sections": [metadata(chunk) for chunk in omitted],
-                        "assessments": combine_assessments(criteria, answers, incomplete)})
+                        "assessments": combined})
     selected_id, ties = rank_reviews(reviews, criteria)
     selected = next((review for review in reviews if review["profile_id"] == selected_id), None)
     incomplete_names = [review["profile_name"] for review in reviews if not review["complete"]]
@@ -339,6 +388,8 @@ def review_pool(job, profiles_df, rankings, checklist, provider=None):
     else:
         reason = "No CV was fully reviewable. Check extraction and omitted sections before choosing."
     return {"schema_version": SCHEMA, "rules_version": RULES,
+            "guidance": {"checklist": checklist.get("guidance_hash", ""),
+                         "evidence": guidance_hash("cv-evidence-review", "cv-evidence-system", "cv-duration-merge")},
             "checklist_version": checklist["version"], "selected_profile_id": selected_id,
             "tied_profile_ids": ties, "provisional": bool(incomplete_names),
             "incomplete_profiles": incomplete_names, "reason": reason,

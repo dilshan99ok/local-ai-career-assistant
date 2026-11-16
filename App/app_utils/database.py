@@ -253,10 +253,14 @@ def initialize_database():
             source_hash TEXT NOT NULL,
             version INTEGER NOT NULL,
             criteria_json TEXT NOT NULL,
+            guidance_hash TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL
         )
         """
     )
+    checklist_columns = {row[1] for row in cursor.execute("PRAGMA table_info(job_cv_checklists)")}
+    if "guidance_hash" not in checklist_columns:
+        cursor.execute("ALTER TABLE job_cv_checklists ADD COLUMN guidance_hash TEXT NOT NULL DEFAULT ''")
     resume_profile_columns = {
         "source_filename": "TEXT",
         "source_type": "TEXT",
@@ -708,7 +712,7 @@ def get_job_resume_recommendation(job_id, context_hash):
         if not row:
             return None
         result = json.loads(row[0])
-        return result if result.get("schema_version") == "ats-preview-v2" and "cv_reviews" in result else None
+        return result if result.get("schema_version") == "ats-preview-v3" and "cv_reviews" in result else None
     finally:
         connection.close()
 
@@ -737,18 +741,18 @@ def get_job_cv_checklist(job_id):
     connection = get_connection()
     try:
         row = connection.execute(
-            "SELECT source_hash, version, criteria_json, updated_at FROM job_cv_checklists WHERE job_id = ?",
+            "SELECT source_hash, version, criteria_json, updated_at, guidance_hash FROM job_cv_checklists WHERE job_id = ?",
             (int(job_id),),
         ).fetchone()
         return {
             "source_hash": row[0], "version": row[1],
-            "criteria": json.loads(row[2]), "updated_at": row[3],
+            "criteria": json.loads(row[2]), "updated_at": row[3], "guidance_hash": row[4],
         } if row else None
     finally:
         connection.close()
 
 
-def save_job_cv_checklist(job_id, source_hash, criteria):
+def save_job_cv_checklist(job_id, source_hash, criteria, guidance_hash=""):
     connection = get_connection()
     try:
         with connection:
@@ -757,12 +761,13 @@ def save_job_cv_checklist(job_id, source_hash, criteria):
             ).fetchone()
             version = int(row[0]) + 1 if row else 1
             connection.execute(
-                """INSERT INTO job_cv_checklists (job_id, source_hash, version, criteria_json, updated_at)
-                   VALUES (?, ?, ?, ?, ?)
+                """INSERT INTO job_cv_checklists (job_id, source_hash, version, criteria_json, guidance_hash, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(job_id) DO UPDATE SET source_hash = excluded.source_hash,
                    version = excluded.version, criteria_json = excluded.criteria_json,
+                   guidance_hash = excluded.guidance_hash,
                    updated_at = excluded.updated_at""",
-                (int(job_id), source_hash, version, json.dumps(criteria), _timestamp()),
+                (int(job_id), source_hash, version, json.dumps(criteria), guidance_hash, _timestamp()),
             )
             connection.execute("DELETE FROM job_resume_recommendations WHERE job_id = ?", (int(job_id),))
         return version

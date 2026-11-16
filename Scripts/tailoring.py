@@ -38,6 +38,11 @@ def build_screening_context(checklist: dict | None, recommendation: dict | None,
         "profile_id": int(profile_id),
         "checklist_version": checklist["version"],
         "provisional_pool": bool(recommendation.get("provisional")),
+        "extraction_diagnostics": {
+            "issues": review.get("extraction_issues", []),
+            "warnings": review.get("extraction_warnings", []),
+            "omitted_sections": review.get("omitted_sections", []),
+        },
         "required_summary": required_criteria_summary(review, criteria),
         "criteria": [
             {**{key: criterion.get(key, "") for key in (
@@ -60,6 +65,12 @@ def format_screening_suggestions(context: dict) -> str:
         lines.append("No required criteria were specified in the job checklist.")
     if context["provisional_pool"]:
         lines.append("The pool recommendation is provisional because another CV review is incomplete.")
+    diagnostics = context.get("extraction_diagnostics", {})
+    if diagnostics.get("issues") or diagnostics.get("omitted_sections"):
+        messages = list(diagnostics.get("issues", []))
+        if diagnostics.get("omitted_sections"):
+            messages.append(f"{len(diagnostics['omitted_sections'])} CV sections not reviewed")
+        lines.append("Extraction or review scope needs checking: " + "; ".join(messages))
     lines.extend(["", "## Clarify or improve"])
     if not context["edits"]:
         lines.append("No unmet or partial criteria were identified in this CV review.")
@@ -120,9 +131,9 @@ def build_follow_up_email_prompt(job: dict, resume_text: str, application: dict 
     application = application or {}
     return render_prompt(
         "follow-up-email", JOB_CONTEXT=_job_context(job),
-        DATE_APPLIED=application.get("date_applied", ""),
-        CONTACT_NAME=application.get("contact_name", ""),
-        CONTACT_ROLE=application.get("contact_role", ""), RESUME_TEXT=resume_text,
+        DATE_APPLIED=application.get("date_applied") or "",
+        CONTACT_NAME=application.get("contact_name") or "",
+        CONTACT_ROLE=application.get("contact_role") or "", RESUME_TEXT=resume_text,
     )
 
 

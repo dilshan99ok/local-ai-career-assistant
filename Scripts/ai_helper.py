@@ -13,6 +13,7 @@ from Scripts.skill_taxonomy import (
     clean_text_value,
 )
 from Scripts.prompt_loader import build_extraction_prompt
+from Scripts.prompt_loader import load_prompt
 from App.app_utils.database import (
     get_cached_extraction,
     save_cached_extraction,
@@ -285,8 +286,8 @@ def build_keyword_fallback_structured_data(job_description: str) -> dict:
     """
     Deterministic fallback extraction for common IT skills and certifications.
 
-    This ensures long JDs still produce useful structured skills even if
-    the local LLM fails, times out, or returns weak JSON.
+    This preserves explicitly named skills and tools when AI extraction
+    returns no structured skills. Avoid inferring a skill from a generic word.
     """
     text = job_description.lower() if job_description else ""
 
@@ -308,7 +309,7 @@ def build_keyword_fallback_structured_data(job_description: str) -> dict:
         ("mfa", "Multi-Factor Authentication", "Microsoft Entra ID & Identity"),
         ("multi-factor authentication", "Multi-Factor Authentication", "Microsoft Entra ID & Identity"),
         ("conditional access", "Conditional Access", "Microsoft Entra ID & Identity"),
-        ("sign-in", "Sign-in Troubleshooting", "Microsoft Entra ID & Identity"),
+        ("sign-in troubleshooting", "Sign-in Troubleshooting", "Microsoft Entra ID & Identity"),
 
         # Active Directory
         ("active directory", "Active Directory", "Active Directory"),
@@ -332,27 +333,22 @@ def build_keyword_fallback_structured_data(job_description: str) -> dict:
         ("soe", "Standard Operating Environment", "Windows Endpoint Support"),
 
         # Hardware / Field
-        ("laptop", "Laptop Support", "Hardware & Field Support"),
-        ("laptops", "Laptop Support", "Hardware & Field Support"),
-        ("desktop", "Desktop Support", "Hardware & Field Support"),
-        ("desktops", "Desktop Support", "Hardware & Field Support"),
-        ("printer", "Printer Support", "Hardware & Field Support"),
-        ("printers", "Printer Support", "Hardware & Field Support"),
-        ("mobile device", "Mobile Device Support", "Hardware & Field Support"),
-        ("mobile devices", "Mobile Device Support", "Hardware & Field Support"),
+        ("laptop support", "Laptop Support", "Hardware & Field Support"),
+        ("desktop support", "Desktop Support", "Hardware & Field Support"),
+        ("printer support", "Printer Support", "Hardware & Field Support"),
+        ("mobile device support", "Mobile Device Support", "Hardware & Field Support"),
         ("meeting room", "Meeting Room Technology", "Hardware & Field Support"),
-        ("onsite", "Onsite Support", "Hardware & Field Support"),
+        ("onsite support", "Onsite Support", "Hardware & Field Support"),
+        ("on-site support", "Onsite Support", "Hardware & Field Support"),
         ("remote support", "Remote Support", "Hardware & Field Support"),
 
         # Service Desk / ITSM
-        ("ticket", "Ticketing", "Service Desk & ITSM"),
+        ("ticketing", "Ticketing", "Service Desk & ITSM"),
         ("ticketing", "Ticketing", "Service Desk & ITSM"),
         ("jira", "Jira Service Management", "Service Desk & ITSM"),
         ("servicenow", "ServiceNow", "Service Desk & ITSM"),
-        ("incident", "Incident Management", "Service Desk & ITSM"),
-        ("incidents", "Incident Management", "Service Desk & ITSM"),
-        ("request", "Service Request Management", "Service Desk & ITSM"),
-        ("requests", "Service Request Management", "Service Desk & ITSM"),
+        ("incident management", "Incident Management", "Service Desk & ITSM"),
+        ("service request management", "Service Request Management", "Service Desk & ITSM"),
         ("sla", "SLA Management", "Service Desk & ITSM"),
         ("escalation", "Escalation Management", "Service Desk & ITSM"),
 
@@ -384,10 +380,8 @@ def build_keyword_fallback_structured_data(job_description: str) -> dict:
 
         # Cisco Routing / Switching
         ("cisco", "Cisco Networking", "Cisco Routing & Switching"),
-        ("router", "Router Configuration", "Cisco Routing & Switching"),
-        ("routers", "Router Configuration", "Cisco Routing & Switching"),
-        ("switch", "Switch Configuration", "Cisco Routing & Switching"),
-        ("switches", "Switch Configuration", "Cisco Routing & Switching"),
+        ("router configuration", "Router Configuration", "Cisco Routing & Switching"),
+        ("switch configuration", "Switch Configuration", "Cisco Routing & Switching"),
         ("vlan", "VLANs", "Cisco Routing & Switching"),
         ("vlans", "VLANs", "Cisco Routing & Switching"),
         ("ospf", "OSPF", "Cisco Routing & Switching"),
@@ -432,7 +426,6 @@ def build_keyword_fallback_structured_data(job_description: str) -> dict:
         ("teams phone", "Microsoft Teams Phone", "Voice / VoIP Networking"),
         ("broadworks", "Cisco BroadWorks", "Voice / VoIP Networking"),
         ("ivr", "IVR", "Voice / VoIP Networking"),
-        ("telecom", "Telecommunications Networking", "General Network Fundamentals"),
 
         # Firewall / Security appliances
         ("firewall", "Firewall Concepts", "Firewall & Network Security"),
@@ -1164,8 +1157,10 @@ def analyze_jd_with_openai(job_description: str, force_refresh: bool = False) ->
     # The previous cleaner could cache an extraction from an empty prompt when
     # a posting began with "About Us". Bump the key to avoid reusing it.
     model = configured_model()
+    prompt_version = hashlib.sha256((load_prompt("job-extraction-prompt") + "\n"
+                                     + load_prompt("job-extraction-system")).encode("utf-8")).hexdigest()
     content_hash = hashlib.sha256(
-        (f"jd-v4:{model}:" + normalized_description).encode("utf-8")
+        (f"jd-v5:{model}:{prompt_version}:" + normalized_description).encode("utf-8")
     ).hexdigest()
 
     extracted_data = None if force_refresh else get_cached_extraction(content_hash)
