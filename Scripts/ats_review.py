@@ -152,13 +152,15 @@ def extraction_warnings(profile):
     return warnings
 
 
-def fingerprint(job, profiles_df, checklist=None, rankings=None):
+def fingerprint(job, profiles_df, checklist=None, rankings=None, include_checklist_metadata=False):
     payload = {
         "schema": SCHEMA, "rules": RULES, "model": configured_model(),
         "review_guidance": guidance_hash("cv-evidence-review", "cv-evidence-system", "cv-duration-merge"),
         "checklist_guidance": checklist_guidance_hash(),
         "job": {key: job.get(key) for key in ("id", "company", "job_title", "domain", "raw_description")},
-        "checklist": checklist or {},
+        # Presentation/migration metadata does not alter the reviewed criteria.
+        "checklist": (checklist or {}) if include_checklist_metadata else
+                     {key: (checklist or {}).get(key) for key in ("source_hash", "version", "criteria")},
         "profiles": [{key: row.get(key) for key in (
             "id", "profile_name", "target_domain", "resume_text", "skills_json",
             "extraction_report_json", "source_filename", "source_type", "updated_at")}

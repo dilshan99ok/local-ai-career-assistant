@@ -270,6 +270,43 @@ def apply_styles():
             margin: 0.5rem 0 1.4rem;
         }
 
+        .job-checklist-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+            gap: 0.7rem;
+            margin: 0.55rem 0 1.2rem;
+        }
+
+        .job-checklist-card {
+            min-width: 0;
+            padding: 0.9rem 1rem;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-left: 3px solid #70bef2;
+            border-radius: 0.65rem;
+            background: rgba(255,255,255,0.025);
+            overflow-wrap: anywhere;
+        }
+
+        .job-checklist-card.preferred { border-left-color: #e4b56d; }
+        .job-checklist-card.screening { border-left-color: #ba9bef; }
+        .job-checklist-card strong { display: block; line-height: 1.35; }
+        .job-checklist-type {
+            color: #9bbbcf;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin-bottom: 0.35rem;
+        }
+        .job-checklist-context,
+        .job-checklist-source {
+            color: #aab2bf;
+            font-size: 0.79rem;
+            line-height: 1.4;
+            margin-top: 0.45rem;
+        }
+        .job-checklist-source { border-top: 1px solid rgba(255,255,255,0.08); padding-top: 0.45rem; }
+
         .job-cv-card,
         .job-skill-panel {
             min-width: 0;

@@ -717,6 +717,16 @@ def get_job_resume_recommendation(job_id, context_hash):
         connection.close()
 
 
+def has_job_resume_recommendation(job_id):
+    connection = get_connection()
+    try:
+        return connection.execute(
+            "SELECT 1 FROM job_resume_recommendations WHERE job_id = ?", (int(job_id),)
+        ).fetchone() is not None
+    finally:
+        connection.close()
+
+
 def save_job_resume_recommendation(job_id, context_hash, result):
     connection = get_connection()
     try:
@@ -757,9 +767,17 @@ def save_job_cv_checklist(job_id, source_hash, criteria, guidance_hash=""):
     try:
         with connection:
             row = connection.execute(
-                "SELECT version FROM job_cv_checklists WHERE job_id = ?", (int(job_id),)
+                "SELECT source_hash, version, criteria_json, guidance_hash FROM job_cv_checklists WHERE job_id = ?", (int(job_id),)
             ).fetchone()
-            version = int(row[0]) + 1 if row else 1
+            # Opening or re-saving an unchanged checklist must not discard a CV review.
+            if row and row[0] == source_hash and json.loads(row[2]) == criteria:
+                if row[3] != guidance_hash:
+                    connection.execute(
+                        "UPDATE job_cv_checklists SET guidance_hash = ? WHERE job_id = ?",
+                        (guidance_hash, int(job_id)),
+                    )
+                return int(row[1])
+            version = int(row[1]) + 1 if row else 1
             connection.execute(
                 """INSERT INTO job_cv_checklists (job_id, source_hash, version, criteria_json, guidance_hash, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?)

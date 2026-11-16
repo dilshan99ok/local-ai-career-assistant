@@ -305,6 +305,26 @@ class ATSReviewTests(unittest.TestCase):
             self.assertIsNone(database.get_job_resume_recommendation(7, key))
             self.assertNotEqual(key, fingerprint(job, profiles, database.get_job_cv_checklist(7)))
 
+    def test_saving_unchanged_checklist_keeps_cached_review(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(database, "DB_PATH", Path(directory) / "career.db"):
+            database.initialize_database()
+            job = {"id": 7, "raw_description": "BGP routing and Linux administration"}
+            rows = [criterion()]
+            version = database.save_job_cv_checklist(7, source_hash(job), rows, "original guidance")
+            saved = database.get_job_cv_checklist(7)
+            profiles = pd.DataFrame([{"id": 1, "resume_text": "BGP", "skills_json": "[]"}])
+            key = fingerprint(job, profiles, saved)
+            result = {"schema_version": SCHEMA, "selected_profile_id": 1,
+                      "cv_reviews": [{"profile_id": 1}]}
+            database.save_job_resume_recommendation(7, key, result)
+            self.assertEqual(database.save_job_cv_checklist(7, source_hash(job), rows, "new guidance"), version)
+            updated = database.get_job_cv_checklist(7)
+            self.assertEqual(updated["criteria"], saved["criteria"])
+            self.assertEqual(updated["version"], saved["version"])
+            self.assertEqual(updated["guidance_hash"], "new guidance")
+            self.assertEqual(fingerprint(job, profiles, updated), key)
+            self.assertEqual(database.get_job_resume_recommendation(7, key), result)
+
     def test_blank_pdf_page_is_an_extraction_issue(self):
         from pypdf import PdfWriter
         writer = PdfWriter()

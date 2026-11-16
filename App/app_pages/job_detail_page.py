@@ -1,3 +1,4 @@
+import ast
 from html import escape
 
 import pandas as pd
@@ -11,6 +12,7 @@ from App.app_utils.database import (
     get_job_detail_df,
     get_job_skills_for_job_df,
     get_job_resume_recommendation,
+    has_job_resume_recommendation,
     get_job_cv_checklist,
     get_resume_profiles_df,
     ensure_resume_extraction_reports,
@@ -189,7 +191,58 @@ def render_overview_tab(job, skills_df):
             st.warning("The original job description was not retained for this older record.")
 
 
-def render_job_checklist(job, job_id, checklist, expanded=False):
+def _checklist_alternatives(value):
+    if isinstance(value, list):
+        return ", ".join(map(str, value))
+    value = clean_value(value)
+    if value.startswith("["):
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, list):
+                return ", ".join(map(str, parsed))
+        except (ValueError, SyntaxError):
+            pass
+    return value
+
+
+def _render_checklist_cards(criteria):
+    for kind in ("Required", "Preferred", "Screening"):
+        items = [item for item in criteria if item["kind"] == kind]
+        if not items:
+            continue
+        st.markdown(f"**{kind}** · {len(items)}")
+        cards = []
+        for item in items:
+            level = clean_value(item.get("requested_level"))
+            alternatives = _checklist_alternatives(item.get("alternatives"))
+            context = " · ".join(part for part in (level, f"Alternatives: {alternatives}" if alternatives else "") if part)
+            context_html = f'<div class="job-checklist-context">{escape(context)}</div>' if context else ""
+            cards.append(
+                f'<div class="job-checklist-card {kind.lower()}">'
+                f'<div class="job-checklist-type">{kind}</div>'
+                f'<strong>{escape(clean_value(item.get("criterion")))}</strong>'
+                f'{context_html}<div class="job-checklist-source">Job ad: {escape(clean_value(item.get("source")))}</div>'
+                '</div>'
+            )
+        st.markdown('<div class="job-checklist-grid">' + "".join(cards) + '</div>', unsafe_allow_html=True)
+
+
+def _save_checklist_and_refresh(job, job_id, current, rows, profiles_df=None, rankings=None, had_review=False):
+    changed = current is None or rows != current["criteria"]
+    if not changed:
+        if current.get("guidance_hash") != checklist_guidance_hash():
+            save_job_cv_checklist(job_id, source_hash(job), rows, checklist_guidance_hash())
+        return
+    save_job_cv_checklist(job_id, source_hash(job), rows, checklist_guidance_hash())
+    if had_review and profiles_df is not None and not profiles_df.empty:
+        updated = get_job_cv_checklist(job_id)
+        with st.spinner("Refreshing CV review for the updated checklist…", show_time=True):
+            result = generate_resume_recommendation(job, profiles_df, rankings, updated)
+            key = recommendation_fingerprint(job, profiles_df, updated, rankings)
+            save_job_resume_recommendation(job_id, key, result)
+
+
+def render_job_checklist(job, job_id, checklist, profiles_df=None, rankings=None, had_review=False):
     st.subheader("Job checklist")
     if checklist is None:
         st.info("Prepare a checklist from the saved job description, then review it before comparing CVs.")
@@ -197,7 +250,7 @@ def render_job_checklist(job, job_id, checklist, expanded=False):
             try:
                 with st.spinner("Reading job requirements…", show_time=True):
                     rows = generate_job_checklist(job)
-                    save_job_cv_checklist(job_id, source_hash(job), rows, checklist_guidance_hash())
+                    _save_checklist_and_refresh(job, job_id, checklist, rows, profiles_df, rankings, had_review)
                 st.rerun()
             except (RuntimeError, ValueError) as error:
                 st.error(f"Checklist could not be prepared: {error}")
@@ -210,15 +263,13 @@ def render_job_checklist(job, job_id, checklist, expanded=False):
             try:
                 with st.spinner("Reading job requirements…", show_time=True):
                     rows = generate_job_checklist(job)
-                    save_job_cv_checklist(job_id, source_hash(job), rows, checklist_guidance_hash())
+                    _save_checklist_and_refresh(job, job_id, checklist, rows, profiles_df, rankings, had_review)
                 st.rerun()
             except (RuntimeError, ValueError) as error:
                 st.error(f"Checklist could not be prepared: {error}")
-    counts = {kind: sum(item["kind"] == kind for item in criteria)
-              for kind in ("Required", "Preferred", "Screening")}
-    st.caption(" · ".join(f"{counts[kind]} {kind.lower()}" for kind in counts))
-    with st.expander("Review and correct criteria", expanded=expanded):
-        st.caption("Edit the requirement, level, alternatives, or exact source wording. Save to refresh the CV review.")
+    _render_checklist_cards(criteria)
+    with st.expander("Edit checklist", expanded=False):
+        st.caption("Saving changed criteria refreshes the CV review. Viewing or saving unchanged criteria keeps the current result.")
         editor = st.data_editor(
             pd.DataFrame(criteria, columns=["id", "kind", "criterion", "source", "requested_level", "alternatives"]),
             key=f"job_checklist_editor_{job_id}_{checklist['version']}",
@@ -238,10 +289,9 @@ def render_job_checklist(job, job_id, checklist, expanded=False):
                 validated = validate_checklist(rows, clean_value(job.get("raw_description")))
                 if not validated:
                     raise ValueError("Add at least one criterion before saving.")
-                if validated != criteria or checklist.get("guidance_hash") != checklist_guidance_hash():
-                    save_job_cv_checklist(job_id, source_hash(job), validated, checklist_guidance_hash())
+                _save_checklist_and_refresh(job, job_id, checklist, validated, profiles_df, rankings, had_review)
                 st.rerun()
-            except ValueError as error:
+            except (RuntimeError, ValueError) as error:
                 st.error(str(error))
     return checklist
 
@@ -258,7 +308,7 @@ def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recomm
     rankings = fit["rankings"]
     if checklist is None or not checklist["criteria"]:
         render_cv_comparison(rankings, recommendation, checklist["criteria"] if checklist else [])
-        render_job_checklist(job, job_id, checklist, expanded=True)
+        render_job_checklist(job, job_id, checklist)
         return
 
     if st.button(
@@ -277,7 +327,9 @@ def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recomm
     if recommendation:
         render_review_outcome(recommendation, profiles_df)
     render_cv_comparison(rankings, recommendation, checklist["criteria"])
-    render_job_checklist(job, job_id, checklist, expanded=not bool(recommendation))
+    render_job_checklist(job, job_id, checklist, profiles_df=profiles_df,
+                         rankings=rankings,
+                         had_review=bool(recommendation) or has_job_resume_recommendation(job_id))
 
     if recommendation:
         render_screening_result(job_id, profiles_df, checklist["criteria"], recommendation, fit["requested"])
@@ -641,6 +693,13 @@ def render_job_detail():
     initial_fit = build_fit_snapshot(skills_df, profiles_df, job.get("domain", ""))
     fingerprint = recommendation_fingerprint(job, profiles_df, checklist, initial_fit["rankings"])
     recommendation = get_job_resume_recommendation(job_id, fingerprint) if not profiles_df.empty else None
+    if recommendation is None and checklist and not profiles_df.empty:
+        legacy_key = recommendation_fingerprint(
+            job, profiles_df, checklist, initial_fit["rankings"], include_checklist_metadata=True,
+        )
+        recommendation = get_job_resume_recommendation(job_id, legacy_key)
+        if recommendation is not None:
+            save_job_resume_recommendation(job_id, fingerprint, recommendation)
     leading_profile_id = None
     if recommendation:
         leading_profile_id = recommendation.get("selected_profile_id")
