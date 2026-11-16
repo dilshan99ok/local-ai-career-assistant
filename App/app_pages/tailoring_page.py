@@ -1,3 +1,5 @@
+import hashlib
+
 import streamlit as st
 
 from App.app_utils.database import (
@@ -22,6 +24,8 @@ from Scripts.resume_recommendation import recommendation_fingerprint, source_has
 from App.app_utils.navigation import navigate_to
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
 from Scripts.tailoring import (
+    build_screening_context,
+    format_screening_suggestions,
     generate_cover_letter,
     generate_follow_up_email,
     generate_resume_tailoring,
@@ -126,17 +130,22 @@ def render_tailoring():
     checklist = get_job_cv_checklist(job_id)
     if checklist and checklist["source_hash"] != source_hash(job):
         checklist = None
+    screening_fingerprint = recommendation_fingerprint(job, profiles_df, checklist, rankings)
     saved_recommendation = get_job_resume_recommendation(
-        job_id, recommendation_fingerprint(job, profiles_df, checklist, rankings)
+        job_id, screening_fingerprint
     ) if checklist else None
-    if saved_recommendation and not saved_recommendation.get("selected_profile_id"):
-        saved_recommendation = None
+    requested_profile_id = st.session_state.pop("tailoring_requested_profile_id", None)
+    available_ids = set(profiles_df["id"].astype(int))
     recommended_id = (
         int(saved_recommendation["selected_profile_id"])
         if saved_recommendation and saved_recommendation.get("selected_profile_id")
-        and int(saved_recommendation["selected_profile_id"]) in set(profiles_df["id"].astype(int))
+        and int(saved_recommendation["selected_profile_id"]) in available_ids
+        else int(saved_recommendation["tied_profile_ids"][0])
+        if saved_recommendation and saved_recommendation.get("tied_profile_ids")
         else int(rankings.iloc[0]["profile_id"])
     )
+    if requested_profile_id is not None and int(requested_profile_id) in available_ids:
+        recommended_id = int(requested_profile_id)
     profile_options = {}
     for _, row in profiles_df.iterrows():
         label = (
@@ -151,7 +160,11 @@ def render_tailoring():
         0,
     )
     selected_profile_label = st.selectbox(
-        "Starting CV" + (" (AI recommended)" if saved_recommendation else " (best skill overlap suggested)"),
+        "Starting CV" + (
+            " (screening recommendation)" if saved_recommendation and saved_recommendation.get("selected_profile_id")
+            else " (screening tie)" if saved_recommendation and saved_recommendation.get("tied_profile_ids")
+            else ""
+        ),
         profile_labels,
         index=recommended_index,
         key="tailoring_profile_selector",
@@ -179,7 +192,17 @@ def render_tailoring():
         key="tailoring_resume_version_selector",
     )
     resume_text = version_options[selected_version]
-    context = (job_id, profile_id, selected_version)
+    screening_context = (
+        build_screening_context(checklist, saved_recommendation, profile_id)
+        if selected_version == "Base CV" and resume_text == clean_value(profile.get("resume_text"))
+        else None
+    )
+    context = (
+        job_id, profile_id, selected_version, source_hash(job),
+        checklist["version"] if checklist else None,
+        hashlib.sha256(resume_text.encode("utf-8")).hexdigest(),
+        screening_fingerprint if screening_context else None,
+    )
     if st.session_state.get("tailoring_generation_context") != context:
         clear_generated_documents()
         st.session_state["tailoring_generation_context"] = context
@@ -207,22 +230,43 @@ def render_tailoring():
     )
 
     with resume_tab:
+        if screening_context:
+            summary = screening_context["required_summary"]
+            with st.container(border=True):
+                st.markdown("#### Saved screening findings")
+                st.write(
+                    f"{summary['demonstrated']} of {summary['total']} required criteria demonstrated"
+                    if summary["total"] else "No required criteria specified"
+                )
+                if screening_context["provisional_pool"]:
+                    st.caption("Pool recommendation is provisional; this CV's review is complete.")
+                for edit in screening_context["edits"]:
+                    st.markdown(f"**{edit['kind']}: {edit['criterion']}**")
+                    st.caption(f"{edit['issue_type'].title()} · Edit {edit['edit_section']}")
+                    if edit["clarify"]:
+                        st.caption(f"Confirm: {edit['clarify']}")
+                st.caption("The saved review is used for suggestions and the tailored draft.")
+        elif saved_recommendation and selected_version == "Base CV":
+            st.info("This CV has no complete screening review. Review it in Fit & gaps before using its findings here.")
         mode = st.radio(
             "Output type",
             ["Suggestions", "Tailored draft"],
             horizontal=True,
             key="resume_tailoring_mode",
         )
-        if st.button("Generate resume output", key="generate_resume_output"):
+        action_label = "Use screening suggestions" if mode == "Suggestions" and screening_context else (
+            "Generate tailored draft" if mode == "Tailored draft" else "Generate resume suggestions"
+        )
+        if st.button(action_label, key="generate_resume_output"):
             try:
-                with st.spinner("Preparing resume recommendations…", show_time=True):
-                    st.session_state["resume_tailoring_output"] = generate_resume_tailoring(
-                        job,
-                        resume_text,
-                        mode,
-                    )
-                    st.session_state["resume_tailoring_mode_saved"] = mode
-                    st.session_state["resume_tailoring_editor"] = st.session_state["resume_tailoring_output"]
+                if mode == "Suggestions" and screening_context:
+                    output = format_screening_suggestions(screening_context)
+                else:
+                    with st.spinner("Preparing resume draft…", show_time=True):
+                        output = generate_resume_tailoring(job, resume_text, mode, screening_context)
+                st.session_state["resume_tailoring_output"] = output
+                st.session_state["resume_tailoring_mode_saved"] = mode
+                st.session_state["resume_tailoring_editor"] = output
                 st.rerun()
             except Exception as error:
                 st.error(f"Could not generate resume output: {error}")

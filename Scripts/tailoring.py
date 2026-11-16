@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
 from Scripts.ai_provider import OpenAIProvider
+from Scripts.resume_recommendation import build_edits, required_criteria_summary
 
 
 def _job_context(job: dict) -> str:
@@ -15,7 +18,79 @@ def _job_context(job: dict) -> str:
     )
 
 
-def build_resume_tailoring_prompt(job: dict, resume_text: str, mode: str) -> str:
+def build_screening_context(checklist: dict | None, recommendation: dict | None, profile_id: int) -> dict | None:
+    """Reuse a complete, cached screening review for the selected base CV."""
+    if (not checklist or not recommendation
+            or checklist.get("version") != recommendation.get("checklist_version")):
+        return None
+    review = next(
+        (item for item in recommendation.get("cv_reviews", [])
+         if int(item["profile_id"]) == int(profile_id)), None,
+    )
+    if not review or not review.get("complete"):
+        return None
+    criteria = checklist.get("criteria", [])
+    assessments = {item["criterion_id"]: item for item in review.get("assessments", [])}
+    if not criteria or {item["id"] for item in criteria} != set(assessments):
+        return None
+    return {
+        "profile_id": int(profile_id),
+        "checklist_version": checklist["version"],
+        "provisional_pool": bool(recommendation.get("provisional")),
+        "required_summary": required_criteria_summary(review, criteria),
+        "criteria": [
+            {**{key: criterion.get(key, "") for key in (
+                "id", "kind", "criterion", "source", "requested_level", "alternatives")},
+             **{key: assessments[criterion["id"]].get(key, "") for key in (
+                 "status", "reason", "evidence", "issue_type", "edit_section", "clarification")}}
+            for criterion in criteria
+        ],
+        "edits": build_edits(review, criteria),
+    }
+
+
+def format_screening_suggestions(context: dict) -> str:
+    """Turn reviewed findings into an editable plan without another AI call."""
+    summary = context["required_summary"]
+    lines = ["# Resume changes from saved screening review", ""]
+    if summary["total"]:
+        lines.append(f"Required criteria demonstrated: {summary['demonstrated']} of {summary['total']}.")
+    else:
+        lines.append("No required criteria were specified in the job checklist.")
+    if context["provisional_pool"]:
+        lines.append("The pool recommendation is provisional because another CV review is incomplete.")
+    lines.extend(["", "## Priority edits"])
+    if not context["edits"]:
+        lines.append("No priority edits were identified in this CV review.")
+    for index, edit in enumerate(context["edits"], 1):
+        lines.extend([
+            f"{index}. **{edit['criterion']}** ({edit['kind']}; {edit['issue_type']})",
+            f"   - Where: {edit['edit_section']}",
+        ])
+        if edit["suggested_wording"]:
+            lines.append(f"   - Supported CV wording: {edit['suggested_wording']}")
+        if edit["clarify"]:
+            lines.append(f"   - Confirm first: {edit['clarify']}")
+    edited_ids = {item["criterion_id"] for item in context["edits"]}
+    other_findings = [item for item in context["criteria"]
+                      if item["kind"] in {"Required", "Preferred"}
+                      and item["status"] != "Demonstrated"
+                      and item["id"] not in edited_ids]
+    if other_findings:
+        lines.extend(["", "## Other checklist findings"])
+    for item in other_findings:
+        lines.append(f"- **{item['kind']} · {item['status']}:** {item['criterion']}")
+    screening = [item for item in context["criteria"] if item["kind"] == "Screening"]
+    if screening:
+        lines.extend(["", "## Screening conditions to confirm"])
+        for item in screening:
+            lines.append(f"- **{item['status']}:** {item['criterion']}")
+    lines.extend(["", "Only add claims you can verify. A missing CV mention does not prove you lack the experience."])
+    return "\n".join(lines)
+
+
+def build_resume_tailoring_prompt(job: dict, resume_text: str, mode: str,
+                                  screening_context: dict | None = None) -> str:
     if mode == "Tailored draft":
         task = (
             "Create a complete tailored resume draft. Preserve all facts from the original resume, "
@@ -30,11 +105,22 @@ def build_resume_tailoring_prompt(job: dict, resume_text: str, mode: str) -> str
             "experience or qualifications."
         )
 
+    review_instructions = (
+        "Use the saved screening review below as the starting assessment. Apply its prioritized "
+        "edits and criterion evidence instead of repeating the screening analysis. Preserve the "
+        "distinction between demonstrated, partial, missing, and unable-to-assess evidence. "
+        "Treat unconfirmed facts as questions, not resume claims.\n\n"
+        "SAVED SCREENING REVIEW\n" + json.dumps(screening_context, ensure_ascii=False)
+        if screening_context else ""
+    )
+
     return f"""
 {task}
 
 Return clean Markdown with headings and bullet points. This is an editing aid for the user, not a
 final submission. Be specific and concise.
+
+{review_instructions}
 
 TARGET JOB
 {_job_context(job)}
@@ -80,10 +166,11 @@ RESUME
 """.strip()
 
 
-def generate_resume_tailoring(job: dict, resume_text: str, mode: str) -> str:
+def generate_resume_tailoring(job: dict, resume_text: str, mode: str,
+                             screening_context: dict | None = None) -> str:
     provider = OpenAIProvider()
     return provider.generate_text(
-        build_resume_tailoring_prompt(job, resume_text, mode),
+        build_resume_tailoring_prompt(job, resume_text, mode, screening_context),
         instructions=(
             "You are a careful resume editor. Preserve truthfulness and clearly label suggestions."
         ),

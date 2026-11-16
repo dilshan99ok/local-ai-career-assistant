@@ -21,7 +21,7 @@ from App.app_utils.database import (
 )
 from Scripts.job_fit import build_fit_snapshot
 from Scripts.resume_recommendation import (
-    generate_job_checklist, generate_resume_recommendation,
+    build_edits, generate_job_checklist, generate_resume_recommendation,
     recommendation_fingerprint, required_criteria_summary, source_hash, validate_checklist,
 )
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
@@ -51,8 +51,12 @@ def go_to_opportunities():
     go_back(fallback="Applications")
 
 
-def go_to_tailoring(job_id):
+def go_to_tailoring(job_id, profile_id=None):
     st.session_state.pop("tailoring_profile_selector", None)
+    if profile_id is not None:
+        st.session_state["tailoring_requested_profile_id"] = int(profile_id)
+    else:
+        st.session_state.pop("tailoring_requested_profile_id", None)
     navigate_to("Tailoring Studio", job_id=int(job_id))
 
 
@@ -305,19 +309,6 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
     st.subheader("Evidence breakdown")
     selected_id = result.get("selected_profile_id")
     names = {int(row["id"]): clean_value(row["profile_name"]) for _, row in profiles_df.iterrows()}
-    if result["suggestions"]:
-        st.markdown("#### First edits to consider")
-        for index, edit in enumerate(result["suggestions"], 1):
-            with st.container(border=True):
-                st.markdown(f"**{index}. {edit['criterion']}** · {edit['kind']}")
-                st.caption(f"{edit['issue_type'].title()} · Edit: {edit['edit_section']}")
-                if edit["suggested_wording"]:
-                    st.write(f"Supported wording: “{edit['suggested_wording']}”")
-                if edit["clarify"]:
-                    st.write(f"Confirm first: {edit['clarify']}")
-        if selected_id and st.button("Create tailored draft", key=f"create_tailored_from_pick_{job_id}"):
-            go_to_tailoring(job_id)
-
     reviews = result["cv_reviews"]
     review_ids = [item["profile_id"] for item in reviews]
     chosen = st.selectbox("Inspect CV review", review_ids,
@@ -325,6 +316,19 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
                           index=review_ids.index(selected_id) if selected_id in review_ids else 0,
                           key=f"screening_review_cv_{job_id}")
     review = next(item for item in reviews if item["profile_id"] == chosen)
+    edits = build_edits(review, criteria) if review.get("complete") else []
+    if edits:
+        st.markdown("#### First edits to consider")
+        for index, edit in enumerate(edits, 1):
+            with st.container(border=True):
+                st.markdown(f"**{index}. {edit['criterion']}** · {edit['kind']}")
+                st.caption(f"{edit['issue_type'].title()} · Edit: {edit['edit_section']}")
+                if edit["suggested_wording"]:
+                    st.write(f"Supported wording: “{edit['suggested_wording']}”")
+                if edit["clarify"]:
+                    st.write(f"Confirm first: {edit['clarify']}")
+    if review.get("complete") and st.button("Tailor this CV", key=f"create_tailored_from_pick_{job_id}"):
+        go_to_tailoring(job_id, chosen)
     if job_skills_df is not None:
         selected_fit = build_fit_snapshot(job_skills_df, profiles_df, profile_id=chosen)
         with st.expander("Skill coverage details"):

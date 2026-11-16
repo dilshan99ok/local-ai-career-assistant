@@ -4,7 +4,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -15,6 +15,10 @@ from Scripts.ats_review import (
 )
 from Scripts.job_fit import build_fit_snapshot
 from Scripts.resume_import import extract_resume_report
+from Scripts.tailoring import (
+    build_resume_tailoring_prompt, build_screening_context,
+    format_screening_suggestions, generate_resume_tailoring,
+)
 
 
 def criterion(identifier="c1", kind="Required", text="BGP routing"):
@@ -41,6 +45,57 @@ class SectionProvider:
 
 
 class ATSReviewTests(unittest.TestCase):
+    def test_saved_screening_follows_selected_cv_into_tailoring(self):
+        criteria = [criterion("c1", text="Production BGP routing"),
+                    criterion("c2", "Preferred", "Linux administration")]
+        checklist = {"version": 4, "criteria": criteria}
+        weaker = {"profile_id": 1, "complete": True,
+                  "assessments": [assessment("c1", "Not shown"),
+                                  assessment("c2", "Demonstrated", "Linux") ]}
+        stronger = {"profile_id": 2, "complete": True,
+                    "assessments": [assessment("c1", "Partially demonstrated", "BGP lab"),
+                                    assessment("c2", "Not shown")]}
+        recommendation = {"checklist_version": 4, "selected_profile_id": None,
+                          "tied_profile_ids": [1, 2], "provisional": False,
+                          "cv_reviews": [weaker, stronger]}
+        context = build_screening_context(checklist, recommendation, 2)
+        self.assertEqual(context["profile_id"], 2)
+        self.assertEqual(context["criteria"][0]["status"], "Partially demonstrated")
+        self.assertEqual(context["edits"][0]["criterion"], "Production BGP routing")
+        suggestions = format_screening_suggestions(context)
+        self.assertIn("Production BGP routing", suggestions)
+        self.assertIn("Where: Experience", suggestions)
+        self.assertIn("BGP lab", suggestions)
+        self.assertNotIn("Other checklist findings", suggestions)
+        prompt = build_resume_tailoring_prompt(
+            {"job_title": "Network engineer", "raw_description": "Production BGP routing"},
+            "BGP lab", "Tailored draft", context)
+        self.assertIn('"status": "Partially demonstrated"', prompt)
+        self.assertIn("instead of repeating the screening analysis", prompt)
+        with patch("Scripts.tailoring.OpenAIProvider") as provider_class:
+            provider = Mock()
+            provider.generate_text.return_value = "draft"
+            provider_class.return_value = provider
+            self.assertEqual(generate_resume_tailoring(
+                {"job_title": "Network engineer", "raw_description": "Production BGP routing"},
+                "BGP lab", "Tailored draft", context), "draft")
+            provider.generate_text.assert_called_once()
+
+    def test_stale_or_incomplete_screening_is_not_forwarded(self):
+        rows = [criterion()]
+        checklist = {"version": 2, "criteria": rows}
+        review = {"profile_id": 1, "complete": False,
+                  "assessments": [assessment("c1", "Unable to assess")]}
+        saved = {"checklist_version": 2, "cv_reviews": [review]}
+        self.assertIsNone(build_screening_context(checklist, saved, 1))
+        review["complete"] = True
+        self.assertIsNone(build_screening_context(checklist, saved, 2))
+        saved["checklist_version"] = 1
+        self.assertIsNone(build_screening_context(checklist, saved, 1))
+        saved["checklist_version"] = 2
+        review["assessments"] = [assessment("unexpected", "Demonstrated", "BGP")]
+        self.assertIsNone(build_screening_context(checklist, saved, 1))
+
     def test_required_criteria_percentage_excludes_partial_and_preferred(self):
         criteria = [criterion("c1", text="BGP"), criterion("c2", text="OSPF"),
                     criterion("c3", text="Linux"), criterion("c4", "Preferred", "Python")]
