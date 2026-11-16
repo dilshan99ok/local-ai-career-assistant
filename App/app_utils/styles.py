@@ -354,6 +354,32 @@ def apply_styles():
             background: #80c7f3;
         }
 
+        .job-cv-required {
+            margin-top: 0.9rem;
+            padding-top: 0.8rem;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .job-cv-required-heading {
+            color: rgba(232,238,246,0.72);
+            font-size: 0.76rem;
+        }
+
+        .job-cv-required-value {
+            margin: 0.2rem 0;
+            color: #eaf6ff;
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+
+        .job-cv-required-detail {
+            margin-top: 0.45rem;
+            color: rgba(232,238,246,0.78);
+            font-size: 0.76rem;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
+        }
+
         .job-skill-panel.found {
             border-top: 2px solid #61c59a;
         }

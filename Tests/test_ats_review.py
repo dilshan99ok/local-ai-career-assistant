@@ -11,7 +11,7 @@ import pandas as pd
 from App.app_utils import database
 from Scripts.ats_review import (
     MAX_SECTIONS, SECTION_CHARS, fingerprint, parse_assessments, rank_reviews,
-    review_pool, source_hash, split_sections,
+    required_criteria_summary, review_pool, source_hash, split_sections,
 )
 from Scripts.job_fit import build_fit_snapshot
 from Scripts.resume_import import extract_resume_report
@@ -41,6 +41,26 @@ class SectionProvider:
 
 
 class ATSReviewTests(unittest.TestCase):
+    def test_required_criteria_percentage_excludes_partial_and_preferred(self):
+        criteria = [criterion("c1", text="BGP"), criterion("c2", text="OSPF"),
+                    criterion("c3", text="Linux"), criterion("c4", "Preferred", "Python")]
+        review = {"assessments": [assessment("c1", "Demonstrated", "BGP"),
+                                  assessment("c2", "Partially demonstrated", "OSPF lab"),
+                                  assessment("c3", "Not shown"),
+                                  assessment("c4", "Demonstrated", "Python")]}
+        summary = required_criteria_summary(review, criteria)
+        self.assertEqual((summary["demonstrated"], summary["total"], summary["percentage"]), (1, 3, 33))
+        self.assertEqual(summary["partial"], ["OSPF"])
+        self.assertEqual(summary["missing"], ["Linux"])
+
+    def test_required_criteria_unable_and_none_specified(self):
+        review = {"assessments": [assessment("c1", "Demonstrated", "BGP"),
+                                  assessment("c2", "Unable to assess")]}
+        summary = required_criteria_summary(review, [criterion("c1"), criterion("c2", text="Linux")])
+        self.assertEqual(summary["unable"], ["Linux"])
+        self.assertEqual((summary["demonstrated"], summary["total"]), (1, 2))
+        self.assertIsNone(required_criteria_summary(review, [criterion("c3", "Preferred")])["percentage"])
+
     def test_required_evidence_outranks_higher_skill_coverage(self):
         criteria = [criterion("c1", "Required", "Production BGP routing"),
                     criterion("c2", "Preferred", "Linux")]

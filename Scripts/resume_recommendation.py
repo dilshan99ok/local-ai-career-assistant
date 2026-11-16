@@ -9,6 +9,7 @@ from Scripts.ats_review import (
     generate_checklist as generate_job_checklist,
     parse_assessments,
     rank_reviews,
+    required_criteria_summary,
     review_pool as generate_resume_recommendation,
     source_hash,
     split_sections as split_review_sections,

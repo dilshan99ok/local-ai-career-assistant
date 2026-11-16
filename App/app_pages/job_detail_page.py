@@ -22,7 +22,7 @@ from App.app_utils.database import (
 from Scripts.job_fit import build_fit_snapshot
 from Scripts.resume_recommendation import (
     generate_job_checklist, generate_resume_recommendation,
-    recommendation_fingerprint, source_hash, validate_checklist,
+    recommendation_fingerprint, required_criteria_summary, source_hash, validate_checklist,
 )
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
 from App.app_utils.navigation import go_back, navigate_to
@@ -215,7 +215,7 @@ def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recomm
         return
 
     rankings = fit["rankings"]
-    render_cv_comparison(rankings, recommendation)
+    render_cv_comparison(rankings, recommendation, checklist["criteria"] if checklist else [])
     if not recommendation:
         render_skill_evidence(fit)
     checklist = render_job_checklist(job, job_id, checklist)
@@ -311,9 +311,35 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
-def render_cv_comparison(rankings, recommendation):
+def render_required_criteria_summary(review, criteria):
+    summary = required_criteria_summary(review, criteria)
+    if not summary["total"]:
+        value = "None specified"
+        count = ""
+    elif summary["unable"]:
+        value = "Review incomplete"
+        count = f"{summary['demonstrated']} of {summary['total']} demonstrated · {len(summary['unable'])} unable to assess"
+    else:
+        value = f"{summary['percentage']}%"
+        count = f"{summary['demonstrated']} of {summary['total']} demonstrated"
+    details = "".join(
+        f'<div class="job-cv-required-detail"><strong>{label}:</strong> '
+        f'{escape(", ".join(summary[key]))}</div>'
+        for key, label in (("partial", "Partial"), ("missing", "Not shown"),
+                           ("unable", "Unable to assess")) if summary[key]
+    )
+    return (
+        '<div class="job-cv-required">'
+        '<div class="job-cv-required-heading">Required criteria demonstrated</div>'
+        f'<div class="job-cv-required-value">{value}</div>'
+        f'<div class="job-cv-count">{count}</div>{details}</div>'
+    )
+
+
+def render_cv_comparison(rankings, recommendation, criteria):
     st.subheader("Compare CVs")
     selected_id = recommendation["selected_profile_id"] if recommendation else None
+    reviews = {int(review["profile_id"]): review for review in recommendation["cv_reviews"]} if recommendation else {}
     cards = []
     for _, row in rankings.iterrows():
         profile_id = int(row["profile_id"])
@@ -323,7 +349,7 @@ def render_cv_comparison(rankings, recommendation):
         category = escape(clean_value(row["target_domain"]) or "General")
         badge = '<span class="job-cv-pick">AI pick</span>' if recommended else ""
         if score is None:
-            score_html = '<span class="job-cv-score-empty">Unavailable</span>'
+            score_html = '<span class="job-cv-score-empty">Unavailable</span><span class="job-cv-score-label">Skill coverage</span>'
             bar = ""
         else:
             matched = int(row["matched"])
@@ -335,11 +361,12 @@ def render_cv_comparison(rankings, recommendation):
                 f'<span style="width: {score}%"></span></div>'
                 f'<div class="job-cv-count">{matched} of {requested} job skills detected</div>'
             )
+        required = render_required_criteria_summary(reviews[profile_id], criteria) if profile_id in reviews else ""
         cards.append(
             f'<div class="job-cv-card{" recommended" if recommended else ""}">'
             f'<div class="job-cv-top"><div><div class="job-cv-name">{name}{badge}</div>'
             f'<div class="job-cv-category">{category}</div></div>'
-            f'<div class="job-cv-score-wrap">{score_html}</div></div>{bar}</div>'
+            f'<div class="job-cv-score-wrap">{score_html}</div></div>{bar}{required}</div>'
         )
     st.markdown('<div class="job-cv-comparison">' + "".join(cards) + "</div>", unsafe_allow_html=True)
 

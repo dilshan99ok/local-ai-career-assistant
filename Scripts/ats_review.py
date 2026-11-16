@@ -234,6 +234,26 @@ def evidence_score(review, criteria, kind):
             values.count("Demonstrated"))
 
 
+def required_criteria_summary(review, criteria):
+    """Report demonstrated requirements without changing the evidence ranking."""
+    required = [item for item in criteria if item["kind"] == "Required"]
+    assessments = {item["criterion_id"]: item["status"] for item in review["assessments"]}
+    groups = {status: [] for status in STATUSES}
+    for item in required:
+        status = assessments.get(item["id"], "Unable to assess")
+        groups[status].append(item["criterion"])
+    demonstrated = len(groups["Demonstrated"])
+    total = len(required)
+    return {
+        "demonstrated": demonstrated,
+        "total": total,
+        "percentage": round(demonstrated / total * 100) if total else None,
+        "partial": groups["Partially demonstrated"],
+        "missing": groups["Not shown"],
+        "unable": groups["Unable to assess"],
+    }
+
+
 def rank_reviews(reviews, criteria):
     eligible = [review for review in reviews if review["complete"]]
     if not eligible:
