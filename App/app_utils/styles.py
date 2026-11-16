@@ -284,6 +284,48 @@ def apply_styles():
             background: rgba(112,190,242,0.08);
         }
 
+        .job-screening-outcome {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            margin: 0.9rem 0 1.35rem;
+            padding: 1rem 1.2rem;
+            border: 1px solid rgba(112,190,242,0.35);
+            border-left: 4px solid #80c7f3;
+            border-radius: 0.65rem;
+            background: rgba(112,190,242,0.08);
+        }
+
+        .job-screening-outcome.tied {
+            border-color: rgba(228,181,109,0.35);
+            border-left-color: #e4b56d;
+            background: rgba(228,181,109,0.07);
+        }
+
+        .job-screening-outcome.incomplete {
+            border-color: rgba(232,238,246,0.23);
+            border-left-color: #a4adbd;
+            background: rgba(232,238,246,0.04);
+        }
+
+        .job-screening-outcome > span {
+            color: rgba(232,238,246,0.7);
+            font-size: 0.78rem;
+        }
+
+        .job-screening-outcome > strong {
+            color: #f4f7fb;
+            font-size: 1.3rem;
+            line-height: 1.25;
+        }
+
+        .job-screening-outcome > p {
+            margin: 0.15rem 0 0;
+            color: rgba(232,238,246,0.78);
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
         .job-cv-top,
         .job-skill-heading {
             display: flex;
@@ -321,27 +363,27 @@ def apply_styles():
 
         .job-cv-score-wrap {
             display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            flex-shrink: 0;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
             line-height: 1.25;
         }
 
         .job-cv-score {
             color: #eaf6ff;
-            font-size: 1.45rem;
+            font-size: 1.05rem;
             font-weight: 700;
         }
 
         .job-cv-score-empty {
             color: rgba(232,238,246,0.6);
             font-size: 0.76rem;
-            text-align: right;
+            text-align: left;
         }
 
         .job-cv-bar {
-            height: 0.45rem;
-            margin: 0.95rem 0 0.4rem;
+            height: 0.32rem;
+            margin: 0.45rem 0 0.35rem;
             overflow: hidden;
             border-radius: 999px;
             background: rgba(255,255,255,0.12);
@@ -355,9 +397,10 @@ def apply_styles():
         }
 
         .job-cv-required {
-            margin-top: 0.9rem;
-            padding-top: 0.8rem;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            margin: 0.85rem 0;
+            padding: 0.9rem 1rem;
+            border-radius: 0.6rem;
+            background: rgba(112,190,242,0.06);
         }
 
         .job-cv-required-heading {
@@ -366,10 +409,38 @@ def apply_styles():
         }
 
         .job-cv-required-value {
-            margin: 0.2rem 0;
-            color: #eaf6ff;
-            font-size: 1.05rem;
+            margin: 0.15rem 0;
+            color: #8fdbb7;
+            font-size: 2rem;
             font-weight: 700;
+            line-height: 1.15;
+        }
+
+        .job-cv-required.partial .job-cv-required-value {
+            color: #e4b56d;
+        }
+
+        .job-cv-required.unknown .job-cv-required-value,
+        .job-cv-required.none .job-cv-required-value {
+            color: #d6deea;
+            font-size: 1.3rem;
+        }
+
+        .job-cv-required-bar {
+            display: flex;
+            height: 0.34rem;
+            margin: 0.55rem 0 0.4rem;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.1);
+        }
+
+        .job-cv-required-bar .full {
+            background: #62c69c;
+        }
+
+        .job-cv-required-bar .partial {
+            background: #e4b56d;
         }
 
         .job-cv-required-detail {
@@ -378,6 +449,80 @@ def apply_styles():
             font-size: 0.76rem;
             line-height: 1.4;
             overflow-wrap: anywhere;
+        }
+
+        .job-cv-skill-summary {
+            padding-top: 0.65rem;
+            border-top: 1px solid rgba(255,255,255,0.09);
+        }
+
+        .job-cv-card.pending .job-cv-skill-summary {
+            margin-top: 0.75rem;
+            border-top: 0;
+        }
+
+        .job-cv-card.pending .job-cv-score {
+            font-size: 1.4rem;
+        }
+
+        .job-criterion-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.7rem;
+            line-height: 1.35;
+        }
+
+        .job-criterion-head strong {
+            min-width: 0;
+            color: #f4f7fb;
+            font-size: 0.92rem;
+        }
+
+        .job-criterion-status {
+            flex-shrink: 0;
+            padding: 0.2rem 0.55rem;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .job-criterion-status.demonstrated {
+            color: #9be4bd;
+            border-color: rgba(98,198,156,0.42);
+            background: rgba(98,198,156,0.12);
+        }
+
+        .job-criterion-status.partial {
+            color: #f0cb91;
+            border-color: rgba(228,181,109,0.42);
+            background: rgba(228,181,109,0.12);
+        }
+
+        .job-criterion-status.missing {
+            color: #f4a0a6;
+            border-color: rgba(235,116,127,0.42);
+            background: rgba(235,116,127,0.12);
+        }
+
+        .job-criterion-status.unknown {
+            color: #cad3df;
+            border-color: rgba(202,211,223,0.32);
+            background: rgba(202,211,223,0.08);
+        }
+
+        .job-criterion-status.confirm {
+            color: #a6d9ff;
+            border-color: rgba(112,190,242,0.42);
+            background: rgba(112,190,242,0.12);
+        }
+
+        @media (max-width: 650px) {
+            .job-criterion-head {
+                flex-direction: column;
+            }
         }
 
         .job-skill-panel.found {
