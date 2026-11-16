@@ -8,8 +8,8 @@ from Scripts.ai_provider import OpenAIProvider, configured_model
 from Scripts.prompt_loader import load_prompt, render_prompt
 
 
-SCHEMA = "ats-preview-v3"
-RULES = 3
+SCHEMA = "ats-preview-v4"
+RULES = 4
 SECTION_CHARS = 7000
 MAX_SECTIONS = 16
 STATUSES = {"Demonstrated", "Partially demonstrated", "Not shown", "Unable to assess"}
@@ -222,6 +222,58 @@ def parse_assessments(raw, criteria, section_text, cv_id):
     return parsed
 
 
+def recover_unverified_quotes(raw, criteria, source_text, cv_id):
+    """Discard unverifiable evidence while preserving valid criterion results."""
+    result = parse_json(raw)
+    rows = result.get("assessments")
+    expected = {item["id"] for item in criteria}
+    if result.get("cv_id") != cv_id or not isinstance(rows, list) or len(rows) != len(expected):
+        raise ValueError("AI returned an invalid CV assessment structure.")
+    seen, affected = set(), []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("AI returned an invalid criterion assessment.")
+        identifier = str(row.get("criterion_id") or "")
+        status = str(row.get("status") or "")
+        if identifier not in expected or identifier in seen or status not in STATUSES:
+            raise ValueError("AI returned an unknown criterion ID or status.")
+        seen.add(identifier)
+        quote = str(row.get("evidence") or "").strip()
+        unverified = bool(quote and fold(quote) not in fold(source_text))
+        missing = status in {"Demonstrated", "Partially demonstrated"} and not quote
+        unmet_without_quote = row.get("issue_type") == "unmet requirement" and not quote
+        if unverified or missing or unmet_without_quote:
+            affected.append(identifier)
+            row.update(status="Unable to assess", reason="The AI's CV evidence could not be verified.",
+                       evidence="", issue_type="missing CV evidence", edit_section="", clarification="")
+    parsed = parse_assessments(json.dumps(result), criteria, source_text, cv_id)
+    return parsed, affected
+
+
+def request_assessments(provider, prompt, criteria, source_text, cv_id):
+    """Retry one invalid response, then quarantine unsupported quotes."""
+    instructions = load_prompt("cv-evidence-system")
+    raw = provider.generate_text(prompt, instructions=instructions)
+    try:
+        return parse_assessments(raw, criteria, source_text, cv_id), []
+    except ValueError as first_error:
+        correction = ("\n\nYour previous JSON failed validation: " + str(first_error)
+                      + " Return the complete JSON again. Copy each evidence excerpt exactly "
+                        "from the supplied CV text. If you cannot verify an excerpt, mark that "
+                        "criterion Unable to assess and leave evidence empty. Do not invent quotes.")
+        raw = provider.generate_text(prompt + correction, instructions=instructions)
+        try:
+            return parse_assessments(raw, criteria, source_text, cv_id), []
+        except ValueError as retry_error:
+            if not any(message in str(retry_error) for message in (
+                    "unsupported CV quote", "no CV quote", "no evidence for unmet requirement")):
+                raise
+            parsed, affected = recover_unverified_quotes(raw, criteria, source_text, cv_id)
+            if not affected:
+                raise
+            return parsed, affected
+
+
 def combine_assessments(criteria, section_answers, incomplete):
     priority = {"Demonstrated": 3, "Partially demonstrated": 2, "Not shown": 1, "Unable to assess": 0}
     combined = []
@@ -250,7 +302,7 @@ def reconcile_duration(job, profile, criteria, section_answers, combined, provid
     """Reassess duration only after evidence from all CV sections is available."""
     duration = duration_criteria(criteria)
     if not duration or len(section_answers) < 2:
-        return combined
+        return combined, []
     evidence = [
         {"section": index + 1, "assessments": [row for row in rows
           if row["criterion_id"] in {item["id"] for item in duration}]}
@@ -268,10 +320,10 @@ def reconcile_duration(job, profile, criteria, section_answers, combined, provid
         CV_ID=int(profile["id"]), SECTION_EVIDENCE=json.dumps(evidence, ensure_ascii=False),
         CHRONOLOGY=chronology,
     )
-    raw = provider.generate_text(prompt, instructions=load_prompt("cv-evidence-system"))
-    merged = parse_assessments(raw, duration, str(profile.get("resume_text") or ""), int(profile["id"]))
+    merged, affected = request_assessments(
+        provider, prompt, duration, str(profile.get("resume_text") or ""), int(profile["id"]))
     by_id = {row["criterion_id"]: row for row in merged}
-    return [by_id.get(row["criterion_id"], row) for row in combined]
+    return [by_id.get(row["criterion_id"], row) for row in combined], affected
 
 
 def evidence_score(review, criteria, kind):
@@ -354,20 +406,26 @@ def review_pool(job, profiles_df, rankings, checklist, provider=None):
         warnings = extraction_warnings(profile)
         match = rankings[rankings["profile_id"] == int(profile["id"])]
         overlap = int(match.iloc[0]["matched"]) if not match.empty else 0
-        answers = []
+        answers, validation_issues = [], []
         for section in reviewed:
-            raw = provider.generate_text(
-                assessment_prompt(job, criteria, profile, section, overlap),
-                instructions=load_prompt("cv-evidence-system"))
-            answers.append(parse_assessments(raw, criteria, section["text"], int(profile["id"])))
-        incomplete = bool(issues or omitted or not reviewed)
+            parsed, affected = request_assessments(
+                provider, assessment_prompt(job, criteria, profile, section, overlap),
+                criteria, section["text"], int(profile["id"]))
+            answers.append(parsed)
+            validation_issues.extend(f"{section['id']}: unverifiable evidence for {identifier}"
+                                     for identifier in affected)
+        incomplete = bool(issues or omitted or not reviewed or validation_issues)
         metadata = lambda chunk: {key: chunk[key] for key in ("id", "start", "end", "label")}
         combined = combine_assessments(criteria, answers, incomplete)
         if not incomplete:
-            combined = reconcile_duration(job, profile, criteria, answers, combined, provider)
+            combined, affected = reconcile_duration(job, profile, criteria, answers, combined, provider)
+            validation_issues.extend(f"duration review: unverifiable evidence for {identifier}"
+                                     for identifier in affected)
+            incomplete = bool(validation_issues)
         reviews.append({"profile_id": int(profile["id"]),
                         "profile_name": str(profile.get("profile_name") or ""),
                         "complete": not incomplete, "extraction_issues": issues,
+                        "validation_issues": validation_issues,
                         "extraction_warnings": warnings,
                         "reviewed_sections": [metadata(chunk) for chunk in reviewed],
                         "omitted_sections": [metadata(chunk) for chunk in omitted],

@@ -712,7 +712,7 @@ def get_job_resume_recommendation(job_id, context_hash):
         if not row:
             return None
         result = json.loads(row[0])
-        return result if result.get("schema_version") == "ats-preview-v3" and "cv_reviews" in result else None
+        return result if result.get("schema_version") == "ats-preview-v4" and "cv_reviews" in result else None
     finally:
         connection.close()
 

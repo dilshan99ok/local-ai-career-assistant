@@ -330,6 +330,8 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
     st.caption("All saved CV text reviewed" if review["complete"] else "Review incomplete")
     if review["extraction_issues"]:
         st.warning("Extraction: " + " · ".join(review["extraction_issues"]))
+    if review.get("validation_issues"):
+        st.warning("Some AI evidence could not be verified: " + " · ".join(review["validation_issues"]))
     if review["omitted_sections"]:
         st.warning(f"{len(review['omitted_sections'])} section(s) not reviewed because of the request size limit.")
     with st.expander(f"Review scope and source · {len(review['reviewed_sections'])} sections reviewed, "

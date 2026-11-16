@@ -12,7 +12,7 @@ from App.app_utils import database
 from Scripts.ats_review import (
     MAX_SECTIONS, SCHEMA, SECTION_CHARS, UNVERIFIED_SOURCE, checklist_guidance_hash,
     fingerprint, generate_checklist, parse_assessments, rank_reviews,
-    required_criteria_summary, review_pool, source_hash, split_sections,
+    request_assessments, required_criteria_summary, review_pool, source_hash, split_sections,
 )
 from Scripts.job_fit import build_fit_snapshot
 from Scripts.resume_import import extract_resume_report
@@ -246,6 +246,39 @@ class ATSReviewTests(unittest.TestCase):
             parse_assessments(json.dumps({"cv_id": 1, "assessments": [
                 assessment("c1", "Not shown"), assessment("c1", "Not shown")]}),
                 [criterion("c1"), criterion("c2")], "Only a lab project", 1)
+
+    def test_unverifiable_quote_is_retried_with_exact_cv_evidence(self):
+        provider = Mock()
+        provider.generate_text.side_effect = [
+            json.dumps({"cv_id": 1, "assessments": [assessment("c1", "Demonstrated", "Invented quote")]}),
+            json.dumps({"cv_id": 1, "assessments": [assessment("c1", "Demonstrated", "BGP lab project")]}),
+        ]
+        rows, affected = request_assessments(provider, "CV ID: 1", [criterion()], "BGP lab project", 1)
+        self.assertEqual(provider.generate_text.call_count, 2)
+        self.assertEqual(rows[0]["evidence"], "BGP lab project")
+        self.assertEqual(affected, [])
+
+    def test_repeated_unverifiable_quote_marks_only_affected_cv_incomplete(self):
+        provider = Mock()
+        def respond(prompt, instructions=""):
+            cv_id = int(re.search(r"CV ID: (\d+)", prompt).group(1))
+            quote = "Invented quote" if cv_id == 1 else "BGP lab project"
+            return json.dumps({"cv_id": cv_id, "assessments": [assessment("c1", "Demonstrated", quote)]})
+        provider.generate_text.side_effect = respond
+        profiles = pd.DataFrame([
+            {"id": 1, "profile_name": "Bad quote", "resume_text": "BGP lab project", "extraction_report_json": "{}"},
+            {"id": 2, "profile_name": "Good quote", "resume_text": "BGP lab project", "extraction_report_json": "{}"},
+        ])
+        result = review_pool({"job_title": "Engineer", "raw_description": "BGP routing"}, profiles,
+                             pd.DataFrame([{"profile_id": 1, "matched": 1}, {"profile_id": 2, "matched": 1}]),
+                             {"version": 1, "criteria": [criterion()]}, provider)
+        self.assertEqual(result["selected_profile_id"], 2)
+        self.assertTrue(result["provisional"])
+        bad = result["cv_reviews"][0]
+        self.assertFalse(bad["complete"])
+        self.assertEqual(bad["assessments"][0]["status"], "Unable to assess")
+        self.assertEqual(bad["assessments"][0]["evidence"], "")
+        self.assertIn("c1", bad["validation_issues"][0])
 
     def test_lab_exposure_does_not_satisfy_production_level(self):
         required = criterion(text="Cisco administration")
