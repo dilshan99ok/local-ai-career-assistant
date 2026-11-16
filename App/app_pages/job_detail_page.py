@@ -64,7 +64,30 @@ def render_fit_metric(fit):
         st.metric("Skill coverage", f"{score}%", help="Share of extracted job skills found in the selected CV. This is not a hiring probability.")
 
 
-def render_job_header(job, job_id, applications_df, fit):
+def required_fit_header_value(recommendation, checklist):
+    """Summarize the leading review without requesting another assessment."""
+    if not recommendation or not checklist:
+        return "Not assessed", "Analyze the CV pool to review required job criteria."
+    review_id = recommendation.get("selected_profile_id")
+    if review_id is None and recommendation.get("tied_profile_ids"):
+        review_id = recommendation["tied_profile_ids"][0]
+    review = next(
+        (item for item in recommendation.get("cv_reviews", []) if item["profile_id"] == review_id), None
+    )
+    if review is None:
+        return "Review incomplete", "No complete CV review is available."
+    summary = required_criteria_summary(review, checklist["criteria"])
+    if not summary["total"]:
+        return "None specified", "The job checklist has no required criteria."
+    detail = f"{summary['demonstrated']} of {summary['total']} required criteria demonstrated"
+    if summary["unable"]:
+        return "Review incomplete", f"{detail}; {len(summary['unable'])} unable to assess."
+    if recommendation.get("provisional"):
+        detail += ". Pool recommendation is provisional because another CV review is incomplete"
+    return f"{summary['percentage']}%", detail
+
+
+def render_job_header(job, job_id, applications_df, fit, recommendation, checklist):
     if not st.session_state.get("navigation_history"):
         if st.button("← Applications", key="back_to_jobs"):
             go_to_opportunities()
@@ -114,11 +137,14 @@ def render_job_header(job, job_id, applications_df, fit):
     if source_url:
         action_col3.link_button("Open original posting", source_url, width="stretch")
 
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
     with metric_col1:
+        required_value, required_help = required_fit_header_value(recommendation, checklist)
+        st.metric("Required criteria fit", required_value, help=required_help)
+    with metric_col2:
         render_fit_metric(fit)
-    metric_col2.metric("Application", applications_label)
-    metric_col3.metric("Follow-up", follow_up)
+    metric_col3.metric("Application", applications_label)
+    metric_col4.metric("Follow-up", follow_up)
 
 
 def render_overview_tab(job, skills_df):
@@ -323,30 +349,32 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
         kind_criteria = [item for item in criteria if item["kind"] == kind]
         if kind_criteria:
             st.markdown(f"#### {kind} criteria" if kind != "Screening" else "#### Screening conditions")
-        for criterion in kind_criteria:
-            item = by_id[criterion["id"]]
-            status = item["status"]
-            if kind == "Screening" and status != "Demonstrated":
-                status = "Not met" if item["issue_type"] == "unmet requirement" else "Confirm · " + status
-            with st.container(border=True):
+        for start in range(0, len(kind_criteria), 2):
+            for column, criterion in zip(st.columns(2, gap="medium"), kind_criteria[start:start + 2]):
+                item = by_id[criterion["id"]]
+                status = item["status"]
+                if kind == "Screening" and status != "Demonstrated":
+                    status = "Not met" if item["issue_type"] == "unmet requirement" else "Confirm · " + status
                 tone = ("confirm" if status.startswith("Confirm") else {
                     "Demonstrated": "demonstrated", "Partially demonstrated": "partial",
                     "Not shown": "missing", "Unable to assess": "unknown", "Not met": "missing",
                 }.get(status, "unknown"))
-                st.markdown(
-                    '<div class="job-criterion-head">'
-                    f'<strong>{escape(criterion["criterion"])}</strong>'
-                    f'<span class="job-criterion-status {tone}">{escape(status)}</span>'
-                    '</div>', unsafe_allow_html=True,
-                )
-                if item["reason"]:
-                    st.caption(item["reason"])
-                with st.expander("Evidence and job wording"):
-                    st.write(f"Job ad: {criterion['source']}")
-                    if criterion["requested_level"] or criterion["alternatives"]:
-                        st.caption(" · ".join(value for value in (
-                            criterion["requested_level"], criterion["alternatives"]) if value))
-                    st.write(f"CV excerpt: {item['evidence']}" if item["evidence"] else "No supporting CV excerpt.")
+                with column:
+                    with st.container(border=True):
+                        st.markdown(
+                            '<div class="job-criterion-head">'
+                            f'<strong>{escape(criterion["criterion"])}</strong>'
+                            f'<span class="job-criterion-status {tone}">{escape(status)}</span>'
+                            '</div>', unsafe_allow_html=True,
+                        )
+                        if criterion["source"].strip() != criterion["criterion"].strip():
+                            st.caption(f"Job ad: {criterion['source']}")
+                        reason = clean_value(item.get("reason"))
+                        evidence = clean_value(item.get("evidence"))
+                        if reason and (not evidence or reason.casefold() not in evidence.casefold()):
+                            st.caption(reason)
+                        if evidence:
+                            st.markdown(f"**CV evidence:** {escape(evidence)}")
 
 
 def render_required_criteria_summary(review, criteria):
@@ -589,12 +617,17 @@ def render_job_detail():
     initial_fit = build_fit_snapshot(skills_df, profiles_df, job.get("domain", ""))
     fingerprint = recommendation_fingerprint(job, profiles_df, checklist, initial_fit["rankings"])
     recommendation = get_job_resume_recommendation(job_id, fingerprint) if not profiles_df.empty else None
+    leading_profile_id = None
+    if recommendation:
+        leading_profile_id = recommendation.get("selected_profile_id")
+        if leading_profile_id is None and recommendation.get("tied_profile_ids"):
+            leading_profile_id = recommendation["tied_profile_ids"][0]
     fit = build_fit_snapshot(
         skills_df, profiles_df, job.get("domain", ""),
-        profile_id=recommendation["selected_profile_id"] if recommendation and recommendation.get("selected_profile_id") else None,
+        profile_id=leading_profile_id,
     )
 
-    render_job_header(job, job_id, applications_df, fit)
+    render_job_header(job, job_id, applications_df, fit, recommendation, checklist)
     overview_tab, fit_tab, packet_tab, tracking_tab = st.tabs(
         ["Overview", "Fit & gaps", "Application packet", "Tracking"]
     )
