@@ -11,13 +11,19 @@ from App.app_utils.database import (
     get_job_detail_df,
     get_job_skills_for_job_df,
     get_job_resume_recommendation,
+    get_job_cv_checklist,
     get_resume_profiles_df,
+    ensure_resume_extraction_reports,
     get_resume_versions_df,
     save_job_resume_recommendation,
+    save_job_cv_checklist,
     update_application_status,
 )
 from Scripts.job_fit import build_fit_snapshot
-from Scripts.resume_recommendation import generate_resume_recommendation, recommendation_fingerprint
+from Scripts.resume_recommendation import (
+    generate_job_checklist, generate_resume_recommendation,
+    recommendation_fingerprint, source_hash, validate_checklist,
+)
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
 from App.app_utils.navigation import go_back, navigate_to
 from Scripts.skill_analysis import build_certification_summary, canonicalize_skill_rows
@@ -53,9 +59,9 @@ def go_to_tailoring(job_id):
 def render_fit_metric(fit):
     score = fit["score"]
     if score is None:
-        st.metric("CV skill overlap", "—", help="Upload a CV to compare its detected skills with this role.")
+        st.metric("Skill coverage", "Unavailable", help="No job skills were extracted, or no CV is available.")
     else:
-        st.metric("CV skill overlap", f"{score}%", help="Share of extracted job skills found in the selected CV. This is not a hiring probability.")
+        st.metric("Skill coverage", f"{score}%", help="Share of extracted job skills found in the selected CV. This is not a hiring probability.")
 
 
 def render_job_header(job, job_id, applications_df, fit):
@@ -152,8 +158,56 @@ def render_overview_tab(job, skills_df):
             st.warning("The original job description was not retained for this older record.")
 
 
-def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, recommendation):
-    st.subheader("Best CV for this job")
+def render_job_checklist(job, job_id, checklist):
+    st.subheader("Job checklist")
+    if checklist is None:
+        st.info("Prepare a checklist from the saved job description, then review it before comparing CVs.")
+        if st.button("Prepare job checklist", key=f"prepare_checklist_{job_id}", type="primary"):
+            try:
+                with st.spinner("Reading job requirements…", show_time=True):
+                    rows = generate_job_checklist(job)
+                    save_job_cv_checklist(job_id, source_hash(job), rows)
+                st.rerun()
+            except (RuntimeError, ValueError) as error:
+                st.error(f"Checklist could not be prepared: {error}")
+        return None
+
+    criteria = checklist["criteria"]
+    counts = {kind: sum(item["kind"] == kind for item in criteria)
+              for kind in ("Required", "Preferred", "Screening")}
+    st.caption(" · ".join(f"{counts[kind]} {kind.lower()}" for kind in counts))
+    with st.expander("Review and correct criteria", expanded=True):
+        st.caption("Edit the requirement, level, alternatives, or exact source wording. Save to refresh the CV review.")
+        editor = st.data_editor(
+            pd.DataFrame(criteria, columns=["id", "kind", "criterion", "source", "requested_level", "alternatives"]),
+            key=f"job_checklist_editor_{job_id}_{checklist['version']}",
+            hide_index=True, num_rows="dynamic", width="stretch",
+            disabled=["id"],
+            column_config={
+                "id": None,
+                "kind": st.column_config.SelectboxColumn("Type", options=["Required", "Preferred", "Screening"], required=True),
+                "criterion": "Criterion", "source": "Source wording",
+                "requested_level": "Requested level", "alternatives": "Alternatives",
+            },
+        )
+        if st.button("Save checklist", key=f"save_checklist_{job_id}"):
+            try:
+                rows = editor.fillna("").to_dict("records")
+                rows = [row for row in rows if row["criterion"] or row["source"]]
+                validated = validate_checklist(rows, clean_value(job.get("raw_description")))
+                if not validated:
+                    raise ValueError("Add at least one criterion before saving.")
+                if validated != criteria:
+                    save_job_cv_checklist(job_id, source_hash(job), validated)
+                st.rerun()
+            except ValueError as error:
+                st.error(str(error))
+    return checklist
+
+
+def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recommendation):
+    st.subheader("CV screening preview")
+    st.caption("Based on the visible job ad and saved CV text; this does not predict an employer's decision.")
     if profiles_df.empty:
         st.info("Upload a CV in Resumes to compare it with this role.")
         if st.button("Open Resumes", key="open_resume_from_fit"):
@@ -161,54 +215,100 @@ def render_fit_tab(job, job_id, fit, profiles_df, fingerprint, recommendation):
         return
 
     rankings = fit["rankings"]
-    if recommendation:
-        chosen = profiles_df[profiles_df["id"] == recommendation["selected_profile_id"]].iloc[0]
-        st.success(f"AI recommends {clean_value(chosen['profile_name'])}")
-        if recommendation["reason"]:
-            st.write(recommendation["reason"])
-    else:
-        if fit["score"] is None:
-            st.info("No extracted skills to compare. AI can still review the job description and CV pool.")
-        else:
-            st.info(f"Top detected skill overlap: {fit['profile_name']}. Ask AI to review the CV pool for a role-based recommendation.")
+    render_cv_comparison(rankings, recommendation)
+    if not recommendation:
+        render_skill_evidence(fit)
+    checklist = render_job_checklist(job, job_id, checklist)
+    if checklist is None or not checklist["criteria"]:
+        return
 
     if st.button(
-        "Refresh AI suggestions" if recommendation else "Analyze CV pool",
+        "Refresh screening preview" if recommendation else "Analyze CV pool",
         key=f"analyze_cv_pool_{job_id}", type="primary",
-        disabled=not bool(clean_value(job.get("raw_description"))),
-        help="Sends the job description and extracted text from every CV to OpenAI. Long CVs may be shortened for the comparison.",
+        help="Sends the job checklist and extracted text from every CV to OpenAI in reviewable sections.",
     ):
         try:
-            with st.spinner("Comparing CVs and preparing suggestions…", show_time=True):
-                result = generate_resume_recommendation(job, profiles_df, rankings)
+            with st.spinner("Reviewing every CV section…", show_time=True):
+                result = generate_resume_recommendation(job, profiles_df, rankings, checklist)
                 save_job_resume_recommendation(job_id, fingerprint, result)
             st.rerun()
         except (RuntimeError, ValueError) as error:
-            st.error(f"CV analysis could not be completed: {error}")
+            st.error(f"CV review could not be completed: {error}")
 
     if recommendation:
-        strengths_col, changes_col = st.columns([1, 2], gap="large")
-        with strengths_col:
-            st.markdown("#### Why this CV")
-            for item in recommendation["strengths"]:
-                st.markdown(f"- {item}")
-            if recommendation["cautions"]:
-                st.markdown("#### Check before using")
-                for item in recommendation["cautions"]:
-                    st.markdown(f"- {item}")
-        with changes_col:
-            st.markdown("#### Suggested edits")
-            for index, item in enumerate(recommendation["suggestions"], 1):
-                with st.container(border=True):
-                    st.markdown(f"**{index}. {item['section'] or 'CV edit'}**")
-                    st.write(item["recommendation"])
-                    if item["evidence"]:
-                        st.caption(f"Based on: {item['evidence']}")
-        if st.button("Create tailored draft", key=f"create_tailored_from_pick_{job_id}"):
+        render_screening_result(job_id, profiles_df, checklist["criteria"], recommendation, fit["requested"])
+
+
+def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df=None):
+    st.subheader("Review result")
+    selected_id = result.get("selected_profile_id")
+    names = {int(row["id"]): clean_value(row["profile_name"]) for _, row in profiles_df.iterrows()}
+    if result.get("provisional"):
+        st.warning("Provisional: incomplete review for " + ", ".join(result["incomplete_profiles"]) + ".")
+    if selected_id:
+        st.success(f"Recommended starting CV: {names.get(int(selected_id), 'CV')}")
+    elif result.get("tied_profile_ids"):
+        st.info("Evidence tie: " + ", ".join(names.get(int(i), str(i)) for i in result["tied_profile_ids"]))
+    else:
+        st.warning("Unable to assess the full CV pool yet.")
+    st.write(result["reason"])
+
+    if result["suggestions"]:
+        st.markdown("#### First edits to consider")
+        for index, edit in enumerate(result["suggestions"], 1):
+            with st.container(border=True):
+                st.markdown(f"**{index}. {edit['criterion']}** · {edit['kind']}")
+                st.caption(f"{edit['issue_type'].title()} · Edit: {edit['edit_section']}")
+                if edit["suggested_wording"]:
+                    st.write(f"Supported wording: “{edit['suggested_wording']}”")
+                if edit["clarify"]:
+                    st.write(f"Confirm first: {edit['clarify']}")
+        if selected_id and st.button("Create tailored draft", key=f"create_tailored_from_pick_{job_id}"):
             go_to_tailoring(job_id)
 
-    render_cv_comparison(rankings, recommendation)
-    render_skill_evidence(fit)
+    reviews = result["cv_reviews"]
+    review_ids = [item["profile_id"] for item in reviews]
+    chosen = st.selectbox("Inspect CV review", review_ids,
+                          format_func=lambda value: names.get(value, str(value)),
+                          index=review_ids.index(selected_id) if selected_id in review_ids else 0,
+                          key=f"screening_review_cv_{job_id}")
+    review = next(item for item in reviews if item["profile_id"] == chosen)
+    if job_skills_df is not None:
+        selected_fit = build_fit_snapshot(job_skills_df, profiles_df, profile_id=chosen)
+        render_skill_evidence(selected_fit)
+    st.caption("Complete review" if review["complete"] else "Incomplete review")
+    if review["extraction_issues"]:
+        st.warning("Extraction: " + " · ".join(review["extraction_issues"]))
+    if review["omitted_sections"]:
+        st.warning(f"{len(review['omitted_sections'])} section(s) not reviewed because of the request size limit.")
+    st.write(f"Reviewed {len(review['reviewed_sections'])} section(s); "
+             f"{len(review['omitted_sections'])} omitted.")
+    with st.expander("Inspect extracted CV text and reviewed sections"):
+        profile = profiles_df[profiles_df["id"] == chosen].iloc[0]
+        for section in review["reviewed_sections"]:
+            st.caption(f"Reviewed {section['id']}: characters {section['start'] + 1}–{section['end']} · {section['label']}")
+        for section in review["omitted_sections"]:
+            st.caption(f"Not reviewed {section['id']}: characters {section['start'] + 1}–{section['end']} · {section['label']}")
+        st.text_area("Saved extracted CV text", value=clean_value(profile.get("resume_text")),
+                     height=320, disabled=True, key=f"screening_cv_text_{job_id}_{chosen}")
+
+    by_id = {item["criterion_id"]: item for item in review["assessments"]}
+    for kind in ("Required", "Preferred", "Screening"):
+        rows = []
+        for criterion in criteria:
+            if criterion["kind"] != kind:
+                continue
+            item = by_id[criterion["id"]]
+            status = item["status"]
+            if kind == "Screening" and status != "Demonstrated":
+                status = "Not met" if item["issue_type"] == "unmet requirement" else "Confirm · " + status
+            rows.append({"Criterion": criterion["criterion"], "Source wording": criterion["source"],
+                         "Level / alternatives": " · ".join(v for v in (
+                             criterion["requested_level"], criterion["alternatives"]) if v),
+                         "Assessment": status, "Reason": item["reason"], "CV excerpt": item["evidence"]})
+        if rows:
+            st.markdown(f"#### {kind} criteria" if kind != "Screening" else "#### Screening conditions")
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
 def render_cv_comparison(rankings, recommendation):
@@ -223,14 +323,14 @@ def render_cv_comparison(rankings, recommendation):
         category = escape(clean_value(row["target_domain"]) or "General")
         badge = '<span class="job-cv-pick">AI pick</span>' if recommended else ""
         if score is None:
-            score_html = '<span class="job-cv-score-empty">No skill comparison</span>'
+            score_html = '<span class="job-cv-score-empty">Unavailable</span>'
             bar = ""
         else:
             matched = int(row["matched"])
             requested = int(row["requested"])
-            score_html = f'<strong class="job-cv-score">{score}%</strong><span class="job-cv-score-label">skill overlap</span>'
+            score_html = f'<strong class="job-cv-score">{score}%</strong><span class="job-cv-score-label">Skill coverage</span>'
             bar = (
-                f'<div class="job-cv-bar" role="progressbar" aria-label="{name} skill overlap" '
+                f'<div class="job-cv-bar" role="progressbar" aria-label="{name} skill coverage" '
                 f'aria-valuenow="{score}" aria-valuemin="0" aria-valuemax="100">'
                 f'<span style="width: {score}%"></span></div>'
                 f'<div class="job-cv-count">{matched} of {requested} job skills detected</div>'
@@ -246,6 +346,8 @@ def render_cv_comparison(rankings, recommendation):
 
 def render_skill_evidence(fit):
     st.subheader("Skill evidence")
+    if fit.get("profile_name"):
+        st.caption(f"Detected in {fit['profile_name']}")
     matched = fit["matched"].get("canonical_skill", pd.Series(dtype=str)).dropna().drop_duplicates().tolist()
     missing = fit["missing"].get("canonical_skill", pd.Series(dtype=str)).dropna().drop_duplicates().tolist()
     if not matched and not missing:
@@ -401,12 +503,17 @@ def render_job_detail():
                 [selected, applications_df[applications_df["id"] != selected_application_id]],
                 ignore_index=True,
             )
+    ensure_resume_extraction_reports()
     profiles_df = get_resume_profiles_df()
-    fingerprint = recommendation_fingerprint(job, profiles_df)
+    checklist = get_job_cv_checklist(job_id)
+    if checklist and checklist["source_hash"] != source_hash(job):
+        checklist = None
+    initial_fit = build_fit_snapshot(skills_df, profiles_df, job.get("domain", ""))
+    fingerprint = recommendation_fingerprint(job, profiles_df, checklist, initial_fit["rankings"])
     recommendation = get_job_resume_recommendation(job_id, fingerprint) if not profiles_df.empty else None
     fit = build_fit_snapshot(
         skills_df, profiles_df, job.get("domain", ""),
-        profile_id=recommendation["selected_profile_id"] if recommendation else None,
+        profile_id=recommendation["selected_profile_id"] if recommendation and recommendation.get("selected_profile_id") else None,
     )
 
     render_job_header(job, job_id, applications_df, fit)
@@ -422,7 +529,7 @@ def render_job_detail():
         else:
             st.dataframe(build_certification_summary(certs_df), width="stretch", hide_index=True)
     with fit_tab:
-        render_fit_tab(job, job_id, fit, profiles_df, fingerprint, recommendation)
+        render_fit_tab(job, job_id, fit, profiles_df, fingerprint, checklist, recommendation)
     with packet_tab:
         render_packet_tab(job_id, applications_df)
     with tracking_tab:

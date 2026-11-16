@@ -16,9 +16,7 @@ from Scripts.resume_helper import extract_resume_skills
 from Scripts.resume_import import extract_resume_details, extract_resume_text
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
 from Scripts.job_fit import build_job_fit_summary, build_fit_snapshot
-from Scripts.resume_recommendation import (
-    generate_resume_recommendation, recommendation_fingerprint,
-)
+from Scripts.resume_recommendation import recommendation_fingerprint
 from Scripts.job_url import JobPageFetchError, fetch_job_posting
 from Scripts.skill_analysis import build_certification_summary, build_skill_demand_summary
 from Scripts.tailoring import (
@@ -193,8 +191,9 @@ class WorkflowTests(unittest.TestCase):
             "Older CV", "Example CV", [], source_filename="older.pdf", source_type="PDF",
         )
         self.assertIsNone(database.get_resume_source_file(legacy_id)[1])
-        database.attach_resume_source_file(legacy_id, "older.pdf", b"%PDF-test")
-        self.assertEqual(database.get_resume_source_file(legacy_id), ("older.pdf", b"%PDF-test"))
+        replacement = build_resume_docx("# Older CV\nNetwork operations")
+        database.attach_resume_source_file(legacy_id, "older.docx", replacement)
+        self.assertEqual(database.get_resume_source_file(legacy_id), ("older.docx", replacement))
 
     def test_category_base_cvs_and_job_drafts_remain_separate(self):
         network_id = database.save_resume_profile(
@@ -230,7 +229,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(build_fit_snapshot(network_skill, profiles, "Networking")["score"], 100)
         self.assertEqual(build_fit_snapshot(network_skill, profiles, "IT Support")["profile_id"], network_id)
 
-    def test_ai_cv_choice_uses_pool_and_saved_result_expires_when_cvs_change(self):
+    def test_cv_review_cache_expires_when_cvs_or_checklist_change(self):
         job = {"id": 9, "company": "Example", "job_title": "Network Engineer",
                "domain": "Networking", "raw_description": "Support BGP routing and Linux."}
         profiles = pd.DataFrame([
@@ -245,32 +244,23 @@ class WorkflowTests(unittest.TestCase):
                                 "skill_basket": "Cisco Routing & Switching"}])
         rankings = build_fit_snapshot(skills, profiles, "Networking")["rankings"]
         self.assertEqual(int(rankings.iloc[0]["profile_id"]), 2)
-        answer = json.dumps({
-            "selected_profile_id": 2, "reason": "Direct routing evidence",
-            "strengths": ["BGP"],
-            "suggestions": [{"section": "Summary", "recommendation": "Lead with routing work",
-                             "evidence": "Supported BGP routing"}],
-            "cautions": ["Do not claim Linux experience without evidence"],
-        })
-        with patch("Scripts.resume_recommendation.OpenAIProvider") as provider:
-            provider.return_value.generate_text.return_value = answer
-            result = generate_resume_recommendation(job, profiles, rankings)
-            prompt = provider.return_value.generate_text.call_args.args[0]
-        self.assertIn("Support CV", prompt)
-        self.assertIn("Network CV", prompt)
-        self.assertEqual(result["selected_profile_id"], 2)
-        fingerprint = recommendation_fingerprint(job, profiles)
+        checklist = {"version": 1, "criteria": [{"id": "c1", "kind": "Required",
+            "criterion": "BGP", "source": "BGP routing", "requested_level": "",
+            "alternatives": ""}]}
+        result = {"schema_version": "ats-preview-v1", "selected_profile_id": 2,
+                  "cv_reviews": [{"profile_id": 2}], "suggestions": []}
+        fingerprint = recommendation_fingerprint(job, profiles, checklist, rankings)
         database.save_job_resume_recommendation(9, fingerprint, result)
         self.assertEqual(database.get_job_resume_recommendation(9, fingerprint), result)
         profiles.loc[1, "resume_text"] = "Changed routing evidence"
         self.assertIsNone(database.get_job_resume_recommendation(
-            9, recommendation_fingerprint(job, profiles)
+            9, recommendation_fingerprint(job, profiles, checklist, rankings)
         ))
+        self.assertNotEqual(fingerprint, recommendation_fingerprint(job, profiles, {**checklist, "version": 2}, rankings))
 
-    def test_ai_cv_choice_rejects_unknown_profile(self):
-        from Scripts.resume_recommendation import parse_recommendation
-        with self.assertRaises(ValueError):
-            parse_recommendation('{"selected_profile_id": 99, "suggestions": [{"recommendation": "Edit"}]}', {1, 2})
+    def test_old_cv_review_cache_is_ignored(self):
+        database.save_job_resume_recommendation(9, "old", {"selected_profile_id": 1, "suggestions": []})
+        self.assertIsNone(database.get_job_resume_recommendation(9, "old"))
 
     def test_remove_base_cv_keeps_job_draft(self):
         first_id = database.save_resume_profile(

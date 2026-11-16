@@ -229,6 +229,7 @@ def initialize_database():
             source_file BLOB,
             target_domain TEXT DEFAULT 'General',
             details_json TEXT DEFAULT '{}',
+            extraction_report_json TEXT DEFAULT '{}',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -245,12 +246,24 @@ def initialize_database():
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_cv_checklists (
+            job_id INTEGER PRIMARY KEY,
+            source_hash TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            criteria_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     resume_profile_columns = {
         "source_filename": "TEXT",
         "source_type": "TEXT",
         "source_file": "BLOB",
         "target_domain": "TEXT DEFAULT 'General'",
         "details_json": "TEXT",
+        "extraction_report_json": "TEXT DEFAULT '{}'",
     }
     existing_resume_columns = {
         row[1]
@@ -629,11 +642,44 @@ def get_resume_profiles_df():
     return load_data(
         """
         SELECT id, profile_name, resume_text, skills_json, is_active,
-               source_filename, source_type, target_domain, details_json, created_at, updated_at
+               source_filename, source_type, target_domain, details_json,
+               extraction_report_json, created_at, updated_at
         FROM resume_profiles
         ORDER BY target_domain, profile_name, id
         """
     )
+
+
+def ensure_resume_extraction_reports():
+    """Record extraction issues for CVs uploaded before reports were stored."""
+    from Scripts.resume_import import ResumeImportError, extract_resume_report
+
+    connection = get_connection()
+    try:
+        rows = connection.execute(
+            """SELECT id, source_filename, source_type, source_file
+               FROM resume_profiles WHERE extraction_report_json IS NULL
+               OR extraction_report_json = '{}'"""
+        ).fetchall()
+        with connection:
+            for row in rows:
+                profile_id, filename, source_type, source_file = row
+                if source_file:
+                    try:
+                        report = extract_resume_report(filename, bytes(source_file))
+                        issues = report["issues"]
+                    except ResumeImportError as error:
+                        issues = [str(error)]
+                elif str(source_type or "").upper() in {"PDF", "DOCX", "FILE"}:
+                    issues = ["Original file unavailable; extraction cannot be checked."]
+                else:
+                    issues = []
+                connection.execute(
+                    "UPDATE resume_profiles SET extraction_report_json = ? WHERE id = ?",
+                    (json.dumps({"issues": issues, "source_type": source_type or "Pasted text"}), profile_id),
+                )
+    finally:
+        connection.close()
 
 
 def get_job_resume_recommendation(job_id, context_hash):
@@ -643,7 +689,10 @@ def get_job_resume_recommendation(job_id, context_hash):
             "SELECT result_json FROM job_resume_recommendations WHERE job_id = ? AND context_hash = ?",
             (int(job_id), context_hash),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        if not row:
+            return None
+        result = json.loads(row[0])
+        return result if result.get("schema_version") == "ats-preview-v1" and "cv_reviews" in result else None
     finally:
         connection.close()
 
@@ -661,9 +710,46 @@ def save_job_resume_recommendation(job_id, context_hash, result):
                      context_hash = excluded.context_hash,
                      result_json = excluded.result_json,
                      created_at = excluded.created_at""",
-                (int(job_id), int(result["selected_profile_id"]), context_hash,
+                (int(job_id), int(result.get("selected_profile_id") or 0), context_hash,
                  json.dumps(result), _timestamp()),
             )
+    finally:
+        connection.close()
+
+
+def get_job_cv_checklist(job_id):
+    connection = get_connection()
+    try:
+        row = connection.execute(
+            "SELECT source_hash, version, criteria_json, updated_at FROM job_cv_checklists WHERE job_id = ?",
+            (int(job_id),),
+        ).fetchone()
+        return {
+            "source_hash": row[0], "version": row[1],
+            "criteria": json.loads(row[2]), "updated_at": row[3],
+        } if row else None
+    finally:
+        connection.close()
+
+
+def save_job_cv_checklist(job_id, source_hash, criteria):
+    connection = get_connection()
+    try:
+        with connection:
+            row = connection.execute(
+                "SELECT version FROM job_cv_checklists WHERE job_id = ?", (int(job_id),)
+            ).fetchone()
+            version = int(row[0]) + 1 if row else 1
+            connection.execute(
+                """INSERT INTO job_cv_checklists (job_id, source_hash, version, criteria_json, updated_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(job_id) DO UPDATE SET source_hash = excluded.source_hash,
+                   version = excluded.version, criteria_json = excluded.criteria_json,
+                   updated_at = excluded.updated_at""",
+                (int(job_id), source_hash, version, json.dumps(criteria), _timestamp()),
+            )
+            connection.execute("DELETE FROM job_resume_recommendations WHERE job_id = ?", (int(job_id),))
+        return version
     finally:
         connection.close()
 
@@ -681,12 +767,18 @@ def get_resume_source_file(profile_id):
 
 
 def attach_resume_source_file(profile_id, filename, data):
+    from Scripts.resume_import import extract_resume_report
+
+    report = extract_resume_report(filename, data)
     connection = get_connection()
     try:
         with connection:
             connection.execute(
-                "UPDATE resume_profiles SET source_filename = ?, source_type = ?, source_file = ?, updated_at = ? WHERE id = ?",
-                (filename, Path(filename).suffix.upper().lstrip("."), data, _timestamp(), profile_id),
+                """UPDATE resume_profiles SET source_filename = ?, source_type = ?, source_file = ?,
+                   extraction_report_json = ?, updated_at = ? WHERE id = ?""",
+                (filename, Path(filename).suffix.upper().lstrip("."), data,
+                 json.dumps({"issues": report["issues"], "source_type": report["source_type"]}),
+                 _timestamp(), profile_id),
             )
     finally:
         connection.close()
@@ -702,6 +794,7 @@ def save_resume_profile(
     source_file=None,
     details=None,
     target_domain="General",
+    extraction_report=None,
 ):
     connection = get_connection()
     now = _timestamp()
@@ -721,6 +814,9 @@ def save_resume_profile(
         if details is not None:
             updates.append("details_json = ?")
             values.append(json.dumps(details))
+        if extraction_report is not None:
+            updates.append("extraction_report_json = ?")
+            values.append(json.dumps(extraction_report))
         values.append(profile_id)
         connection.execute(
             f"UPDATE resume_profiles SET {', '.join(updates)} WHERE id = ?", values
@@ -730,8 +826,9 @@ def save_resume_profile(
             """
             INSERT INTO resume_profiles
             (profile_name, resume_text, skills_json, is_active, source_filename,
-             source_type, source_file, target_domain, details_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             source_type, source_file, target_domain, details_json,
+             extraction_report_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 profile_name,
@@ -743,6 +840,7 @@ def save_resume_profile(
                 source_file,
                 target_domain,
                 json.dumps(details or {}),
+                json.dumps(extraction_report or {}),
                 now,
                 now,
             ),

@@ -45,6 +45,11 @@ def _extract_docx_text(data: bytes) -> str:
 
 
 def _extract_pdf_text(data: bytes) -> str:
+    pages = _extract_pdf_pages(data)
+    return "\n\n".join(page for page in pages if page)
+
+
+def _extract_pdf_pages(data: bytes) -> list[str]:
     try:
         from pypdf import PdfReader
     except ImportError as error:
@@ -57,7 +62,7 @@ def _extract_pdf_text(data: bytes) -> str:
         pages = [(page.extract_text() or "").strip() for page in reader.pages]
     except Exception as error:  # pypdf exposes several parser-specific exceptions.
         raise ResumeImportError("The PDF file could not be read.") from error
-    return "\n\n".join(page for page in pages if page)
+    return pages
 
 
 def extract_resume_text(file_name: str, data: bytes) -> str:
@@ -79,6 +84,26 @@ def extract_resume_text(file_name: str, data: bytes) -> str:
     normalized = re.sub(r"[ \t]+", " ", normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized.strip()
+
+
+def extract_resume_report(file_name: str, data: bytes) -> dict:
+    """Keep source extraction warnings separate from later AI review omissions."""
+    suffix = Path(file_name or "").suffix.lower()
+    issues = []
+    if suffix == ".pdf":
+        pages = _extract_pdf_pages(data)
+        blank = [str(index) for index, page in enumerate(pages, 1) if not page]
+        if blank:
+            issues.append(f"No readable text on PDF page(s): {', '.join(blank)}")
+        text = "\n\n".join(page for page in pages if page)
+        text = re.sub(r"\r\n?", "\n", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    else:
+        text = extract_resume_text(file_name, data)
+    if len(text) < 80:
+        issues.append("Very little readable text was extracted; check the original file.")
+    return {"text": text, "issues": issues, "source_type": suffix.lstrip(".").upper() or "Text"}
 
 
 SECTION_ALIASES = {

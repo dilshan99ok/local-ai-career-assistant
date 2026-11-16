@@ -110,7 +110,7 @@ def build_fit_snapshot(skills_df, profiles_df, job_domain="", profile_id=None):
 
 def fit_label(score) -> str:
     if score is None:
-        return "Add resume"
+        return "Unavailable"
     if score >= 80:
         return "Strong match"
     if score >= 60:
@@ -122,7 +122,7 @@ def fit_label(score) -> str:
 
 def fit_display(score) -> str:
     if score is None:
-        return "Add resume"
+        return "Unavailable"
     short_label = {
         "Strong match": "Strong",
         "Promising": "Promising",

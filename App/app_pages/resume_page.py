@@ -20,6 +20,7 @@ from Scripts.resume_profiles import PROFILE_CATEGORIES, category_from_filename
 from Scripts.resume_import import (
     ResumeImportError,
     extract_resume_details,
+    extract_resume_report,
     extract_resume_text,
 )
 from Scripts.resume_preview import ResumePreviewError, docx_to_pdf
@@ -48,6 +49,11 @@ def cached_docx_to_pdf(data):
 @st.cache_data(show_spinner=False, max_entries=16)
 def cached_resume_text(filename, data):
     return extract_resume_text(filename, data)
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def cached_resume_report(filename, data):
+    return extract_resume_report(filename, data)
 
 
 def display_pdf(data):
@@ -137,13 +143,17 @@ def render_add_cvs(profiles_df):
                     st.markdown(f"**{escape(uploaded.name)}**")
                     try:
                         with st.spinner(f"Reading {uploaded.name}…"):
-                            extracted = cached_resume_text(uploaded.name, uploaded.getvalue())
+                            report = cached_resume_report(uploaded.name, uploaded.getvalue())
+                            extracted = report["text"]
                         if not extracted:
                             raise ResumeImportError("No readable text found.")
                     except ResumeImportError as error:
                         errors.append(f"{uploaded.name}: {error}")
                         st.error(str(error))
                         continue
+
+                    if report["issues"]:
+                        st.warning(" · ".join(report["issues"]))
 
                     name_col, category_col = st.columns([1.3, 1], gap="medium")
                     name = name_col.text_input(
@@ -163,7 +173,7 @@ def render_add_cvs(profiles_df):
                             key=f"batch_resume_preview_{generation}_{index}",
                             label_visibility="collapsed",
                         )
-                    prepared.append((name.strip(), category, uploaded.name, reviewed_text.strip(), uploaded.getvalue()))
+                    prepared.append((name.strip(), category, uploaded.name, reviewed_text.strip(), uploaded.getvalue(), report))
             submitted = st.form_submit_button(
                 "Save CV" if len(files) == 1 else f"Save {len(files)} CVs", type="primary"
             )
@@ -181,7 +191,7 @@ def render_add_cvs(profiles_df):
                 return
             with st.spinner("Saving CVs…", show_time=True):
                 progress = st.progress(0, text="Saving CVs") if len(prepared) > 1 else None
-                for index, (name, category, filename, resume_text, source_file) in enumerate(prepared, 1):
+                for index, (name, category, filename, resume_text, source_file, report) in enumerate(prepared, 1):
                     save_resume_profile(
                         name, resume_text, extract_resume_skills(resume_text),
                         source_filename=filename,
@@ -189,6 +199,7 @@ def render_add_cvs(profiles_df):
                         source_file=source_file,
                         details=extract_resume_details(resume_text),
                         target_domain=category,
+                        extraction_report={"issues": report["issues"], "source_type": report["source_type"]},
                     )
                     if progress:
                         progress.progress(index / len(prepared), text=f"Saved {index} of {len(prepared)} CVs")

@@ -5,6 +5,7 @@ from App.app_utils.database import (
     get_applications_for_job_df,
     get_application_messages_df,
     get_job_detail_df,
+    get_job_cv_checklist,
     get_job_resume_recommendation,
     get_job_skills_for_job_df,
     get_jobs_df,
@@ -17,7 +18,7 @@ from App.app_utils.database import (
 )
 from App.app_pages.opportunities_page import tracked_jobs
 from Scripts.job_fit import attach_fit_scores, rank_resume_profiles
-from Scripts.resume_recommendation import recommendation_fingerprint
+from Scripts.resume_recommendation import recommendation_fingerprint, source_hash
 from App.app_utils.navigation import navigate_to
 from Scripts.resume_export import build_resume_docx, safe_resume_filename
 from Scripts.tailoring import (
@@ -122,12 +123,18 @@ def render_tailoring():
     rankings = rank_resume_profiles(
         get_job_skills_for_job_df(job_id), profiles_df, clean_value(job.get("domain"))
     )
+    checklist = get_job_cv_checklist(job_id)
+    if checklist and checklist["source_hash"] != source_hash(job):
+        checklist = None
     saved_recommendation = get_job_resume_recommendation(
-        job_id, recommendation_fingerprint(job, profiles_df)
-    )
+        job_id, recommendation_fingerprint(job, profiles_df, checklist, rankings)
+    ) if checklist else None
+    if saved_recommendation and not saved_recommendation.get("selected_profile_id"):
+        saved_recommendation = None
     recommended_id = (
         int(saved_recommendation["selected_profile_id"])
-        if saved_recommendation and int(saved_recommendation["selected_profile_id"]) in set(profiles_df["id"].astype(int))
+        if saved_recommendation and saved_recommendation.get("selected_profile_id")
+        and int(saved_recommendation["selected_profile_id"]) in set(profiles_df["id"].astype(int))
         else int(rankings.iloc[0]["profile_id"])
     )
     profile_options = {}
