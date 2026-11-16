@@ -59,18 +59,27 @@ def format_screening_suggestions(context: dict) -> str:
         lines.append("No required criteria were specified in the job checklist.")
     if context["provisional_pool"]:
         lines.append("The pool recommendation is provisional because another CV review is incomplete.")
-    lines.extend(["", "## Priority edits"])
+    lines.extend(["", "## Clarify or improve"])
     if not context["edits"]:
-        lines.append("No priority edits were identified in this CV review.")
+        lines.append("No unmet or partial criteria were identified in this CV review.")
     for index, edit in enumerate(context["edits"], 1):
         lines.extend([
             f"{index}. **{edit['criterion']}** ({edit['kind']}; {edit['issue_type']})",
             f"   - Where: {edit['edit_section']}",
         ])
         if edit["suggested_wording"]:
-            lines.append(f"   - Supported CV wording: {edit['suggested_wording']}")
+            lines.append(f"   - Existing CV excerpt: {edit['suggested_wording']}")
         if edit["clarify"]:
             lines.append(f"   - Confirm first: {edit['clarify']}")
+        else:
+            lines.append("   - Confirm first: Does the excerpt meet the full requirement and requested level?")
+    strengths = [item for item in context["criteria"]
+                 if item["kind"] in {"Required", "Preferred"}
+                 and item["status"] == "Demonstrated" and item["evidence"]]
+    if strengths:
+        lines.extend(["", "## Evidence to bring forward"])
+        for item in strengths:
+            lines.append(f"- **{item['kind']}: {item['criterion']}** — {item['evidence']}")
     edited_ids = {item["criterion_id"] for item in context["edits"]}
     other_findings = [item for item in context["criteria"]
                       if item["kind"] in {"Required", "Preferred"}

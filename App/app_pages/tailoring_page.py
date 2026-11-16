@@ -232,29 +232,48 @@ def render_tailoring():
     with resume_tab:
         if screening_context:
             summary = screening_context["required_summary"]
-            with st.container(border=True):
-                st.markdown("#### Saved screening findings")
-                st.write(
-                    f"{summary['demonstrated']} of {summary['total']} required criteria demonstrated"
-                    if summary["total"] else "No required criteria specified"
-                )
-                if screening_context["provisional_pool"]:
-                    st.caption("Pool recommendation is provisional; this CV's review is complete.")
+            strengths = [item for item in screening_context["criteria"]
+                         if item["kind"] in {"Required", "Preferred"}
+                         and item["status"] == "Demonstrated" and item["evidence"]]
+            st.subheader("Your CV against this job")
+            score_col, attention_col, strength_col = st.columns(3)
+            score_col.metric("Required demonstrated",
+                             f"{summary['demonstrated']} / {summary['total']}" if summary["total"] else "None specified")
+            attention_col.metric("Needs attention", len(screening_context["edits"]))
+            strength_col.metric("Evidence to bring forward", len(strengths))
+            if screening_context["provisional_pool"]:
+                st.caption("The pool recommendation is provisional; this CV review is complete.")
+            change_col, evidence_col = st.columns(2, gap="medium")
+            with change_col:
+                st.markdown("#### Clarify or strengthen")
+                if not screening_context["edits"]:
+                    st.caption("No partial or missing criteria in this review.")
                 for edit in screening_context["edits"]:
-                    st.markdown(f"**{edit['kind']}: {edit['criterion']}**")
-                    st.caption(f"{edit['issue_type'].title()} · Edit {edit['edit_section']}")
-                    if edit["clarify"]:
-                        st.caption(f"Confirm: {edit['clarify']}")
-                st.caption("The saved review is used for suggestions and the tailored draft.")
+                    with st.container(border=True):
+                        st.markdown(f"**{edit['criterion']}**")
+                        st.caption(f"{edit['kind']} · {edit['issue_type'].title()} · Edit {edit['edit_section']}")
+                        if edit["suggested_wording"]:
+                            st.caption(f"Existing CV excerpt: {edit['suggested_wording'][:240]}")
+                        st.caption("Confirm the full requirement before adding a claim."
+                                   if not edit["clarify"] else f"Confirm: {edit['clarify']}")
+            with evidence_col:
+                st.markdown("#### Evidence to bring forward")
+                if not strengths:
+                    st.caption("No demonstrated criteria with CV evidence were found.")
+                for item in strengths:
+                    with st.container(border=True):
+                        st.markdown(f"**{item['criterion']}**")
+                        st.caption(f"{item['kind']} · {item['evidence'][:240]}")
         elif saved_recommendation and selected_version == "Base CV":
             st.info("This CV has no complete screening review. Review it in Fit & gaps before using its findings here.")
+        st.markdown("#### Create resume output")
         mode = st.radio(
             "Output type",
             ["Suggestions", "Tailored draft"],
             horizontal=True,
             key="resume_tailoring_mode",
         )
-        action_label = "Use screening suggestions" if mode == "Suggestions" and screening_context else (
+        action_label = "Create change plan from this review" if mode == "Suggestions" and screening_context else (
             "Generate tailored draft" if mode == "Tailored draft" else "Generate resume suggestions"
         )
         if st.button(action_label, key="generate_resume_output"):

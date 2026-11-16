@@ -20,6 +20,7 @@ from App.app_utils.database import (
     update_application_status,
 )
 from Scripts.job_fit import build_fit_snapshot
+from Scripts.ats_review import UNVERIFIED_SOURCE
 from Scripts.resume_recommendation import (
     build_edits, generate_job_checklist, generate_resume_recommendation,
     recommendation_fingerprint, required_criteria_summary, source_hash, validate_checklist,
@@ -316,33 +317,20 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
                           index=review_ids.index(selected_id) if selected_id in review_ids else 0,
                           key=f"screening_review_cv_{job_id}")
     review = next(item for item in reviews if item["profile_id"] == chosen)
-    edits = build_edits(review, criteria) if review.get("complete") else []
-    if edits:
-        st.markdown("#### First edits to consider")
-        for index, edit in enumerate(edits, 1):
-            with st.container(border=True):
-                st.markdown(f"**{index}. {edit['criterion']}** · {edit['kind']}")
-                st.caption(f"{edit['issue_type'].title()} · Edit: {edit['edit_section']}")
-                if edit["suggested_wording"]:
-                    st.write(f"Supported wording: “{edit['suggested_wording']}”")
-                if edit["clarify"]:
-                    st.write(f"Confirm first: {edit['clarify']}")
-    if review.get("complete") and st.button("Tailor this CV", key=f"create_tailored_from_pick_{job_id}"):
-        go_to_tailoring(job_id, chosen)
-    if job_skills_df is not None:
-        selected_fit = build_fit_snapshot(job_skills_df, profiles_df, profile_id=chosen)
-        with st.expander("Skill coverage details"):
-            render_skill_evidence(selected_fit, show_heading=False)
-    st.caption("Complete review of saved CV text" if review["complete"] else "Incomplete review")
+    st.caption("All saved CV text reviewed" if review["complete"] else "Review incomplete")
     if review["extraction_issues"]:
         st.warning("Extraction: " + " · ".join(review["extraction_issues"]))
-    if review.get("extraction_warnings"):
-        st.info("Source verification: " + " · ".join(review["extraction_warnings"])
-                + " The review uses the saved extracted CV text.")
     if review["omitted_sections"]:
         st.warning(f"{len(review['omitted_sections'])} section(s) not reviewed because of the request size limit.")
-    with st.expander(f"Review scope · {len(review['reviewed_sections'])} sections reviewed, "
+    with st.expander(f"Review scope and source · {len(review['reviewed_sections'])} sections reviewed, "
                      f"{len(review['omitted_sections'])} omitted"):
+        if review.get("extraction_warnings"):
+            if UNVERIFIED_SOURCE in review["extraction_warnings"]:
+                st.caption("The original file is not attached. Screening used the saved extracted CV text.")
+            other_warnings = [warning for warning in review["extraction_warnings"]
+                              if warning != UNVERIFIED_SOURCE]
+            if other_warnings:
+                st.caption(" · ".join(other_warnings))
         profile = profiles_df[profiles_df["id"] == chosen].iloc[0]
         for section in review["reviewed_sections"]:
             st.caption(f"Reviewed {section['id']}: characters {section['start'] + 1}–{section['end']} · {section['label']}")
@@ -382,6 +370,23 @@ def render_screening_result(job_id, profiles_df, criteria, result, job_skills_df
                             st.caption(reason)
                         if evidence:
                             st.markdown(f"**CV evidence:** {escape(evidence)}")
+
+    if review.get("complete"):
+        edits = build_edits(review, criteria)
+        st.markdown("#### Prepare this CV")
+        if edits:
+            st.caption(f"{len(edits)} priority item(s) need clarification or stronger evidence. "
+                       "Demonstrated criteria can also be brought forward in the tailored version.")
+            for edit in edits:
+                st.markdown(f"**{edit['kind']}: {edit['criterion']}** · {edit['edit_section']}")
+        else:
+            st.caption("No partial or missing criteria found. Tailoring can bring the strongest evidence forward.")
+        if st.button("Open in Tailoring Studio", key=f"create_tailored_from_pick_{job_id}", type="primary"):
+            go_to_tailoring(job_id, chosen)
+    if job_skills_df is not None:
+        selected_fit = build_fit_snapshot(job_skills_df, profiles_df, profile_id=chosen)
+        with st.expander("Skill coverage details"):
+            render_skill_evidence(selected_fit, show_heading=False)
 
 
 def render_required_criteria_summary(review, criteria):

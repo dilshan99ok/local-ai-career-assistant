@@ -96,6 +96,22 @@ class ATSReviewTests(unittest.TestCase):
         review["assessments"] = [assessment("unexpected", "Demonstrated", "BGP")]
         self.assertIsNone(build_screening_context(checklist, saved, 1))
 
+    def test_change_plan_includes_demonstrated_evidence_as_strength(self):
+        criteria = [criterion("required", text="Production routing"),
+                    criterion("preferred", "Preferred", "Linux")]
+        review = {"profile_id": 3, "complete": True,
+                  "assessments": [assessment("required", "Partially demonstrated", "Routing lab"),
+                                  assessment("preferred", "Demonstrated", "Linux server support")]}
+        context = build_screening_context(
+            {"version": 1, "criteria": criteria},
+            {"checklist_version": 1, "cv_reviews": [review]}, 3)
+        plan = format_screening_suggestions(context)
+        self.assertIn("## Clarify or improve", plan)
+        self.assertIn("Routing lab", plan)
+        self.assertIn("Confirm first", plan)
+        self.assertIn("## Evidence to bring forward", plan)
+        self.assertIn("Linux server support", plan)
+
     def test_required_criteria_percentage_excludes_partial_and_preferred(self):
         criteria = [criterion("c1", text="BGP"), criterion("c2", text="OSPF"),
                     criterion("c3", text="Linux"), criterion("c4", "Preferred", "Python")]
