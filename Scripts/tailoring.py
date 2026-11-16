@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from Scripts.ai_provider import OpenAIProvider
+from Scripts.prompt_loader import load_prompt, render_prompt
 from Scripts.resume_recommendation import build_edits, required_criteria_summary
 
 
@@ -100,79 +101,29 @@ def format_screening_suggestions(context: dict) -> str:
 
 def build_resume_tailoring_prompt(job: dict, resume_text: str, mode: str,
                                   screening_context: dict | None = None) -> str:
-    if mode == "Tailored draft":
-        task = (
-            "Create a complete tailored resume draft. Preserve all facts from the original resume, "
-            "do not invent employers, dates, qualifications, tools, achievements, or metrics, and "
-            "use the job's terminology only where it is truthful."
-        )
-    else:
-        task = (
-            "Create an actionable resume change plan. Include: overall fit summary, missing or weak "
-            "skills, recommended summary changes, bullet-point rewrites, keyword suggestions, ATS "
-            "risks, and a short list of claims that must not be added without evidence. Do not invent "
-            "experience or qualifications."
-        )
-
     review_instructions = (
-        "Use the saved screening review below as the starting assessment. Apply its prioritized "
-        "edits and criterion evidence instead of repeating the screening analysis. Preserve the "
-        "distinction between demonstrated, partial, missing, and unable-to-assess evidence. "
-        "Treat unconfirmed facts as questions, not resume claims.\n\n"
-        "SAVED SCREENING REVIEW\n" + json.dumps(screening_context, ensure_ascii=False)
+        render_prompt("resume-screening-review", SCREENING_JSON=json.dumps(screening_context, ensure_ascii=False))
         if screening_context else ""
     )
-
-    return f"""
-{task}
-
-Return clean Markdown with headings and bullet points. This is an editing aid for the user, not a
-final submission. Be specific and concise.
-
-{review_instructions}
-
-TARGET JOB
-{_job_context(job)}
-
-ORIGINAL RESUME
-{resume_text}
-""".strip()
+    return render_prompt(
+        "resume-draft" if mode == "Tailored draft" else "resume-suggestions",
+        SCREENING_REVIEW=review_instructions, JOB_CONTEXT=_job_context(job), RESUME_TEXT=resume_text,
+    )
 
 
 def build_cover_letter_prompt(job: dict, resume_text: str, tone: str, length: str) -> str:
-    return f"""
-Write an editable cover letter for the target job below using only facts supported by the resume.
-Do not invent experience, metrics, qualifications, company details, or relationships. Do not include
-placeholders except [Hiring Manager] when no contact name is available. Use a {tone} tone and keep it
-{length}. Return only the letter body with a greeting and closing.
-
-TARGET JOB
-{_job_context(job)}
-
-RESUME
-{resume_text}
-""".strip()
+    return render_prompt("cover-letter", TONE=tone, LENGTH=length,
+                         JOB_CONTEXT=_job_context(job), RESUME_TEXT=resume_text)
 
 
 def build_follow_up_email_prompt(job: dict, resume_text: str, application: dict | None = None) -> str:
     application = application or {}
-    return f"""
-Write a concise, professional follow-up email for an application to the target job below.
-Use only facts supported by the resume and application details. Do not invent interview dates,
-conversations, achievements, hiring timelines, or contact relationships. Do not pressure the
-recipient. Return a subject line followed by the email body.
-
-TARGET JOB
-{_job_context(job)}
-
-APPLICATION DETAILS
-Applied: {application.get('date_applied', '')}
-Contact name: {application.get('contact_name', '')}
-Contact role: {application.get('contact_role', '')}
-
-RESUME
-{resume_text}
-""".strip()
+    return render_prompt(
+        "follow-up-email", JOB_CONTEXT=_job_context(job),
+        DATE_APPLIED=application.get("date_applied", ""),
+        CONTACT_NAME=application.get("contact_name", ""),
+        CONTACT_ROLE=application.get("contact_role", ""), RESUME_TEXT=resume_text,
+    )
 
 
 def generate_resume_tailoring(job: dict, resume_text: str, mode: str,
@@ -180,9 +131,7 @@ def generate_resume_tailoring(job: dict, resume_text: str, mode: str,
     provider = OpenAIProvider()
     return provider.generate_text(
         build_resume_tailoring_prompt(job, resume_text, mode, screening_context),
-        instructions=(
-            "You are a careful resume editor. Preserve truthfulness and clearly label suggestions."
-        ),
+        instructions=load_prompt("resume-editor-system"),
     )
 
 
@@ -190,9 +139,7 @@ def generate_cover_letter(job: dict, resume_text: str, tone: str, length: str) -
     provider = OpenAIProvider()
     return provider.generate_text(
         build_cover_letter_prompt(job, resume_text, tone, length),
-        instructions=(
-            "You are a careful cover-letter editor. Use only evidence from the supplied resume."
-        ),
+        instructions=load_prompt("cover-letter-system"),
     )
 
 
@@ -200,8 +147,5 @@ def generate_follow_up_email(job: dict, resume_text: str, application: dict | No
     provider = OpenAIProvider()
     return provider.generate_text(
         build_follow_up_email_prompt(job, resume_text, application),
-        instructions=(
-            "You are a careful job-search communication editor. Keep the message concise, truthful, "
-            "and editable."
-        ),
+        instructions=load_prompt("follow-up-system"),
     )

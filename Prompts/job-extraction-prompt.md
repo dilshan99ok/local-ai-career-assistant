@@ -67,4 +67,4 @@ Rules:
 - Do not include benefits, culture statements, or generic equal-opportunity text. Keep explicit salary information only in salary_range.
 
 Job description:
-[PASTE JOB DESCRIPTION HERE]
+{{JOB_DESCRIPTION}}

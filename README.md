@@ -52,3 +52,5 @@ The sign-in flow uses a browser-based OAuth callback and stores its refresh toke
 The CV pool analysis sends the job description and extracted text from every uploaded CV to OpenAI only when **Analyze CV pool** is selected. Long CVs may be shortened for the comparison. Generated suggestions should be reviewed before use.
 
 The supported app entry point is `App/dashboard.py`; see [architecture](docs/architecture.md) for the current modules and data flow.
+
+The AI instructions are maintained in the versioned [prompt library](Prompts/README.md).

@@ -10,6 +10,7 @@ from dotenv import dotenv_values
 from openai import OpenAI
 
 from Scripts.chatgpt_auth import ChatGPTAuth, ChatGPTAuthError
+from Scripts.prompt_loader import load_prompt
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -108,18 +109,7 @@ class OpenAIProvider:
         completed = False
         stream = self.client.responses.create(
             model=self.model,
-            instructions=(
-                "Extract only information supported by the supplied job description. "
-                "If a text value is not present, return an empty string; if a list "
-                "value is not present, return an empty array. Use Other when the "
-                "job's domain cannot be confidently selected. "
-                "Preserve the complete advertised job title, including any "
-                "seniority or level prefix such as Junior, Senior, Graduate, "
-                "Associate, Lead, Principal, or Staff. "
-                "Do not infer company details, skills, certifications, or responsibilities."
-                " When a recruiter or talent consultancy is named and the end client is undisclosed, use the recruiter as company and preserve the distinction in recruiter_name and end_client_name."
-                " Extract location, salary range, and work mode only when explicitly supported by the posting."
-            ),
+            instructions=load_prompt("job-extraction-system"),
             input=[{"role": "user", "content": prompt}],
             store=False,
             stream=True,
@@ -170,7 +160,7 @@ class OpenAIProvider:
         completed = False
         stream = self.client.responses.create(
             model=self.model,
-            instructions=instructions or "Return only the requested editable content.",
+            instructions=instructions or load_prompt("default-output-system"),
             input=[{"role": "user", "content": prompt}],
             store=False,
             stream=True,
